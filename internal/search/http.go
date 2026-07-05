@@ -91,7 +91,29 @@ func (a *httpAdapter) Search(ctx context.Context, query string) (Result, error) 
 	items, count := a.parseItems(raw)
 	res.Items = items
 	res.Count = count
+
+	// Honesty check: a 2xx that returns an HTML page (not JSON) almost always
+	// means the URL is a web page, not a search API — e.g. a single-page-app
+	// shell. Surface that rather than reporting a hollow "success".
+	if count == 0 {
+		ct := resp.Header.Get("Content-Type")
+		if looksHTML(ct, raw) {
+			res.Note = "endpoint returned an HTML page, not JSON results — check the endpoint URL (and results JSON path)"
+		} else if a.opts.itemsPath != "" {
+			res.Note = "no results parsed — check the results JSON path"
+		}
+	}
 	return res, nil
+}
+
+// looksHTML reports whether the response is an HTML document rather than data.
+func looksHTML(contentType string, body []byte) bool {
+	if strings.Contains(strings.ToLower(contentType), "text/html") {
+		return true
+	}
+	trimmed := strings.TrimSpace(string(body[:min(len(body), 256)]))
+	low := strings.ToLower(trimmed)
+	return strings.HasPrefix(low, "<!doctype html") || strings.HasPrefix(low, "<html")
 }
 
 func (a *httpAdapter) buildURL(query string) (target, body string, err error) {

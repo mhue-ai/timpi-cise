@@ -31,7 +31,10 @@ environment required.
 
 3. Your browser opens the dashboard at `http://127.0.0.1:8770`.
 4. It starts in **dry-run** mode (no network). Pick a mode, press **Start**, and
-   watch the metrics.
+   watch the **Live results** panel — it shows each query and its top results in
+   miniature (title, host, snippet) with a pulsing "LIVE" indicator, so you can
+   see at a glance that it's working. If an endpoint returns HTML instead of
+   results, an honest amber note says so rather than faking success.
 
 ### Command-line flags
 
@@ -52,20 +55,36 @@ environment required.
 | **public-web** | Exercises the public `timpi.com` search the way the site itself does. | the search request URL (see below) |
 | **official-api** | Uses an authenticated Timpi Data API endpoint. | endpoint URL + API key |
 
-### Configuring `public-web`
+### The destination endpoint (what's best)
 
-`timpi.com` is a JavaScript app whose results load from a background request that
-isn't publicly documented, so the endpoint is **configuration**, not hardcoded.
-Capture it once:
+The **endpoint is fully user-editable** in the dashboard, and the app ships with
+the best discoverable default already filled in. Here's what the default is and
+why:
 
-1. Open `https://timpi.com` in Chrome/Firefox.
-2. Open **DevTools → Network** (F12), then run a search.
-3. Find the request that returns the results (usually JSON).
-4. Copy its URL into the dashboard's **Endpoint URL** field. Use `{query}` where
-   the search term goes, e.g. `https://…/api/search?q={query}`, or leave a
-   **Query param** like `q` and the tool appends it.
-5. (Optional) Set **Results JSON path** (e.g. `data.results`) plus the title/url/
-   snippet field names so parsed results show in the table.
+`timpi.com`'s search is a **Blazor Server** application. It runs over a stateful
+**SignalR WebSocket** (`/_blazor`) with server-rendered UI diffs — there is **no
+public REST/JSON search endpoint** to point an HTTP client at. (`api.timpi.com`
+exists but 404s on search paths; `timpi.com/api/search?q=…` just returns the
+app's HTML shell.)
+
+So:
+
+- **For real, robust programmatic exercising, use `official-api` mode** with the
+  Timpi **Data API** endpoint + key you request from `hello@timpi.io`. That is
+  the interface Timpi actually provides for machine queries.
+- The **`public-web` default** (`https://timpi.com/api/search?q={query}`) is a
+  best-effort HTTP starting point. Because timpi.com currently returns HTML there
+  rather than JSON, **the app tells you so honestly** — it shows an amber note
+  *"endpoint returned an HTML page, not JSON results"* instead of faking success.
+  Override the field with a real REST endpoint whenever one becomes available.
+- To point at any JSON search API: put the URL in **Endpoint URL** (use `{query}`
+  for the term, or set a **Query param** like `q`), then set **Results JSON path**
+  (e.g. `data.results`) plus the title/url/snippet field names so results parse
+  and show in the live preview.
+
+> **Faithful human-UI exercising** (driving the actual Blazor page in a real
+> browser) is out of scope for the self-contained binary — it would require
+> bundling a headless browser. The Data API is the intended machine path.
 
 ### Configuring `official-api`
 

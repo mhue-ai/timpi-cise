@@ -248,10 +248,16 @@ func (r *Runner) step(stop <-chan struct{}) time.Duration {
 	if err != nil {
 		summary.Err = err.Error()
 	}
+	summary.Note = result.Note
 	for i, it := range result.Items {
 		if i >= 3 {
 			break
 		}
+		summary.Preview = append(summary.Preview, metrics.PreviewItem{
+			Title:   it.Title,
+			URL:     it.URL,
+			Snippet: it.Snippet,
+		})
 		if it.Title != "" {
 			summary.TopTitles = append(summary.TopTitles, it.Title)
 		}

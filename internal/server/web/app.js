@@ -60,8 +60,52 @@ async function refresh() {
       $("stopBtn").disabled = true;
     }
 
+    renderLive(m.recent || [], m.running);
     renderResults(m.recent || []);
   } catch (e) { /* server not up yet */ }
+}
+
+function hostOf(u) {
+  try { return new URL(u).host; } catch { return ""; }
+}
+
+// renderLive shows the most recent query and its results in miniature so it is
+// obvious the tool is working.
+function renderLive(rows, running) {
+  const beat = $("liveBeat");
+  const body = $("liveBody");
+  if (!rows.length) {
+    beat.textContent = running ? "waiting…" : "idle";
+    beat.className = "beat" + (running ? " beat-on" : "");
+    return;
+  }
+  const r = rows[0]; // newest first
+  beat.textContent = running ? "live" : "stopped";
+  beat.className = "beat" + (running ? " beat-on" : "");
+
+  const items = r.preview || [];
+  const cards = items.length
+    ? items.map((it) => `
+        <div class="mini">
+          <div class="mini-title">${esc(it.title || "(no title)")}</div>
+          ${it.url ? `<div class="mini-url">${esc(hostOf(it.url) || it.url)}</div>` : ""}
+          ${it.snippet ? `<div class="mini-snip">${esc(it.snippet)}</div>` : ""}
+        </div>`).join("")
+    : `<p class="livehint">No result items to preview${r.status ? ` (HTTP ${r.status})` : ""}.</p>`;
+
+  const note = r.note ? `<div class="livenote">⚠ ${esc(r.note)}</div>` : "";
+  const stamp = fmtTime(r.time);
+  const okdot = r.ok ? `<span class="dot ok"></span>` : `<span class="dot bad"></span>`;
+
+  body.innerHTML = `
+    <div class="liveq">
+      ${okdot}
+      <span class="badge ${esc(r.kind)}">${esc(r.kind)}</span>
+      <span class="liveq-text" title="${esc(r.query)}">${esc(r.query)}</span>
+      <span class="liveq-meta">${r.count} results · ${r.latency_ms} ms · ${stamp}</span>
+    </div>
+    ${note}
+    <div class="minis">${cards}</div>`;
 }
 
 function renderResults(rows) {

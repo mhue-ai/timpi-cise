@@ -26,6 +26,7 @@ type Result struct {
 	Count      int
 	Items      []Item
 	LatencyMS  int64
+	Note       string        // advisory note, e.g. "returned HTML, not JSON results"
 	RetryAfter time.Duration // parsed from a 429/503 Retry-After, if any
 }
 

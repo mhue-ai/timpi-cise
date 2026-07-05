@@ -259,6 +259,12 @@ func Default() Config {
 			},
 		},
 		PublicWeb: PublicWeb{
+			// Best discoverable HTTP starting point. NOTE: timpi.com's search is
+			// a Blazor Server app that runs over a SignalR WebSocket, so this URL
+			// currently returns the app's HTML shell rather than JSON results —
+			// the app will say so honestly. Override it with a real REST endpoint
+			// when one is available, or use official-api mode.
+			Endpoint:   "https://timpi.com/api/search?q={query}",
 			Method:     "GET",
 			QueryParam: "q",
 			TitleKey:   "title",
