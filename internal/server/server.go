@@ -106,17 +106,16 @@ func hostIsLocal(hostport string) bool {
 	return false
 }
 
-// originMatchesHost reports whether a request Origin is same-origin with the
-// request Host (or is itself loopback).
+// originMatchesHost reports whether a request Origin is exactly same-origin with
+// the request Host. A loopback fallback is deliberately NOT allowed: a page
+// served by a *different* local port (e.g. http://127.0.0.1:9999) must not be
+// able to forge state-changing requests to the dashboard.
 func originMatchesHost(origin, host string) bool {
 	u, err := url.Parse(origin)
 	if err != nil {
 		return false
 	}
-	if u.Host == host {
-		return true
-	}
-	return hostIsLocal(u.Host)
+	return u.Host == host
 }
 
 // Addr returns the listen address.
@@ -252,7 +251,7 @@ func (s *Server) handleTerms(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
 		return
 	}
-	data, err := readUpload(r)
+	data, err := readUpload(w, r)
 	if err != nil {
 		s.log.Warn("terms upload: read failed", "err", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -294,8 +293,8 @@ func (s *Server) handleTerms(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func readUpload(r *http.Request) ([]byte, error) {
-	r.Body = http.MaxBytesReader(nil, r.Body, maxUploadBytes)
+func readUpload(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if file, _, err := r.FormFile("file"); err == nil {
 		defer file.Close()
 		return io.ReadAll(file)

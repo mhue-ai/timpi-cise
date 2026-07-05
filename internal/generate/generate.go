@@ -96,6 +96,10 @@ func (g *Generator) Next(ctx context.Context) Query {
 		return q
 	}
 
+	if g.cfg.Mode == config.GenRealistic {
+		return g.realistic()
+	}
+
 	kind := g.cfg.Mode
 	if kind == config.GenMixed {
 		kinds := []string{config.GenTerms, config.GenPhrases, config.GenQuestions}
@@ -112,6 +116,32 @@ func (g *Generator) Next(ctx context.Context) Query {
 	default:
 		return Query{Text: g.term(ctx), Kind: config.GenTerms}
 	}
+}
+
+// realistic returns a query drawn from the curated corpus with head-weighted
+// sampling, so common queries recur (like real search traffic) while the long
+// tail stays diverse. The kind is inferred from the text.
+func (g *Generator) realistic() Query {
+	i := g.zipfIndex(len(realisticQueries))
+	text := realisticQueries[i]
+	return Query{Text: text, Kind: inferKind(text)}
+}
+
+// zipfIndex returns an index in [0,n) biased toward 0 (the head). Taking the
+// minimum of three uniform draws yields a cheap, monotonically decreasing
+// distribution — head items are sampled several times more often than tail
+// items, approximating a Zipfian shape without precomputed weights.
+func (g *Generator) zipfIndex(n int) int {
+	if n <= 1 {
+		return 0
+	}
+	best := g.rng.IntN(n)
+	for k := 0; k < 2; k++ {
+		if v := g.rng.IntN(n); v < best {
+			best = v
+		}
+	}
+	return best
 }
 
 // useModel reports whether the given kind should be produced by the model.

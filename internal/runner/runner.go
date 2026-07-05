@@ -156,7 +156,7 @@ func (r *Runner) applyResultsLog(c config.Config) {
 			r.log.Warn("closing results CSV failed", "path", curPath, "err", err)
 		}
 	}
-	w, err := reslog.Open(wantPath)
+	w, err := reslog.Open(wantPath, r.log)
 	if err != nil {
 		r.log.Error("could not open results CSV", "path", wantPath, "err", err)
 		r.mu.Lock()
@@ -236,14 +236,9 @@ func (r *Runner) safeStep(stop <-chan struct{}) (wait time.Duration) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			r.log.Error("recovered from panic in query step", "panic", rec, "stack", string(debug.Stack()))
-			r.mu.Lock()
-			r.fails++
-			base := time.Duration(r.cfg.PollSeconds) * time.Second
-			r.mu.Unlock()
-			if base < config.MinPollSeconds*time.Second {
-				base = config.MinPollSeconds * time.Second
-			}
-			wait = base
+			// Treat a panic as a failure so backoff applies (avoids hammering on
+			// a persistent panic); nextWait handles the fail counter and floor.
+			wait = r.nextWait(r.Config(), false, 0)
 		}
 	}()
 	return r.step(stop)

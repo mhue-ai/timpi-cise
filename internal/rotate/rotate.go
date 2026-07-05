@@ -4,6 +4,7 @@
 package rotate
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,11 +13,12 @@ import (
 
 // Writer is an io.WriteCloser that rotates its backing file by size.
 type Writer struct {
-	mu   sync.Mutex
-	path string
-	max  int64
-	f    *os.File
-	size int64
+	mu       sync.Mutex
+	path     string
+	max      int64
+	f        *os.File
+	size     int64
+	rotateAt int64
 }
 
 // New opens (appending to) path and rotates once it would exceed maxBytes.
@@ -32,7 +34,7 @@ func New(path string, maxBytes int64) (*Writer, error) {
 	if info, serr := f.Stat(); serr == nil {
 		size = info.Size()
 	}
-	return &Writer{path: path, max: maxBytes, f: f, size: size}, nil
+	return &Writer{path: path, max: maxBytes, f: f, size: size, rotateAt: maxBytes}, nil
 }
 
 // Write implements io.Writer, rotating first if the write would exceed the size
@@ -40,36 +42,49 @@ func New(path string, maxBytes int64) (*Writer, error) {
 func (w *Writer) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.max > 0 && w.size+int64(len(p)) > w.max {
-		if err := w.rotate(); err != nil {
-			// If rotation fails, keep writing to the current file rather than
-			// dropping the log line.
-			w.size = 0
-		}
+	if w.max > 0 && w.size+int64(len(p)) > w.rotateAt {
+		w.rotate()
 	}
 	n, err := w.f.Write(p)
 	w.size += int64(n)
 	return n, err
 }
 
-// rotate renames the current file with a timestamp and opens a fresh one. The
-// caller must hold w.mu.
-func (w *Writer) rotate() error {
+// rotate renames the current file with a timestamp and opens a fresh one. If the
+// rename fails, it keeps appending to the current file (never truncating, so no
+// log data is lost) and defers the next attempt. The caller must hold w.mu.
+func (w *Writer) rotate() {
 	if err := w.f.Close(); err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "log rotate: close failed: %v\n", err)
 	}
 	ts := time.Now().Format("20060102-150405")
 	ext := filepath.Ext(w.path)
 	base := w.path[:len(w.path)-len(ext)]
-	_ = os.Rename(w.path, base+"-"+ts+ext)
+
+	if err := os.Rename(w.path, base+"-"+ts+ext); err != nil {
+		// Do not truncate — reopen for append and back off the next rotation.
+		fmt.Fprintf(os.Stderr, "log rotate: rename failed, continuing on current file: %v\n", err)
+		f, oerr := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if oerr != nil {
+			fmt.Fprintf(os.Stderr, "log rotate: reopen failed: %v\n", oerr)
+			return
+		}
+		w.f = f
+		if s, serr := f.Stat(); serr == nil {
+			w.size = s.Size()
+		}
+		w.rotateAt = w.size + w.max
+		return
+	}
 
 	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "log rotate: open fresh file failed: %v\n", err)
+		return
 	}
 	w.f = f
 	w.size = 0
-	return nil
+	w.rotateAt = w.max
 }
 
 // Close closes the underlying file.

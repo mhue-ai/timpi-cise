@@ -134,7 +134,14 @@ func (a *browserAdapter) Search(ctx context.Context, query string) (Result, erro
 		return Result{Query: query, LatencyMS: latency}, fmt.Errorf("browser: extract failed: %w", err)
 	}
 	var items []Item
-	_ = json.Unmarshal([]byte(raw), &items)
+	if raw != "" && raw != "null" {
+		if uerr := json.Unmarshal([]byte(raw), &items); uerr != nil {
+			// Malformed extraction (e.g. a bad selector) — surface it distinctly
+			// from a genuine zero-result page.
+			return Result{Query: query, Status: 200, LatencyMS: latency,
+				Note: "could not parse scraped results — check the item/title selectors"}, nil
+		}
+	}
 
 	res := Result{Query: query, Status: 200, Count: len(items), Items: items, LatencyMS: latency}
 	if len(items) == 0 {
@@ -169,6 +176,7 @@ func mergeDone(parent, other context.Context) (context.Context, context.CancelFu
 		select {
 		case <-other.Done():
 			cancel()
+		case <-ctx.Done(): // parent timeout fired — drain promptly
 		case <-stop:
 		}
 	}()

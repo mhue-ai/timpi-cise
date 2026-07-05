@@ -1,11 +1,14 @@
 // Package reslog appends each executed query result to a CSV file so runs can be
-// audited or analyzed later. It is safe for concurrent use and flushes after
-// every row so nothing is lost if the process is killed.
+// audited or analyzed later. It is safe for concurrent use, flushes after every
+// row, and rotates by size so the file cannot grow without bound. Rotation never
+// destroys existing data: if the rotated-file rename fails (e.g. the file is
+// held open on Windows), it keeps appending to the current file instead.
 package reslog
 
 import (
 	"encoding/csv"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,8 +21,7 @@ import (
 // ErrClosed is returned by Write after the writer has been closed.
 var ErrClosed = errors.New("reslog: writer is closed")
 
-// maxBytes is the size at which the CSV is rotated to a timestamped file and a
-// fresh one is started, so the results log cannot grow without bound.
+// maxBytes is the size at which the CSV is rotated to a timestamped file.
 const maxBytes = 10 << 20 // 10 MiB
 
 var header = []string{
@@ -28,17 +30,22 @@ var header = []string{
 
 // Writer appends result rows to a CSV file.
 type Writer struct {
-	mu     sync.Mutex
-	f      *os.File
-	w      *csv.Writer
-	path   string
-	size   int64
-	closed bool
+	mu       sync.Mutex
+	log      *slog.Logger
+	f        *os.File
+	w        *csv.Writer
+	path     string
+	size     int64 // current on-disk size (kept accurate via Stat)
+	rotateAt int64 // rotate once size reaches this
+	closed   bool
 }
 
 // Open creates (or appends to) the CSV file at path, writing a header row if the
 // file is new or empty. Parent directories are created as needed.
-func Open(path string) (*Writer, error) {
+func Open(path string, log *slog.Logger) (*Writer, error) {
+	if log == nil {
+		log = slog.Default()
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
@@ -46,14 +53,13 @@ func Open(path string) (*Writer, error) {
 	if err != nil {
 		return nil, err
 	}
+	w := csv.NewWriter(f)
 	info, err := f.Stat()
 	if err != nil {
 		f.Close()
 		return nil, err
 	}
-	w := csv.NewWriter(f)
-	size := info.Size()
-	if size == 0 {
+	if info.Size() == 0 {
 		if err := w.Write(header); err != nil {
 			f.Close()
 			return nil, err
@@ -63,45 +69,68 @@ func Open(path string) (*Writer, error) {
 			f.Close()
 			return nil, err
 		}
-		if s, serr := f.Stat(); serr == nil {
-			size = s.Size()
-		}
 	}
-	return &Writer{f: f, w: w, path: path, size: size}, nil
+	wr := &Writer{log: log, f: f, w: w, path: path, rotateAt: maxBytes}
+	wr.refreshSize()
+	return wr, nil
 }
 
-// rotate closes the current file, renames it with a timestamp, and opens a fresh
-// file (with header). The caller must hold w.mu.
-func (w *Writer) rotate() error {
-	w.w.Flush()
-	if err := w.f.Close(); err != nil {
-		return err
-	}
-	ts := time.Now().Format("20060102-150405")
-	ext := filepath.Ext(w.path)
-	base := w.path[:len(w.path)-len(ext)]
-	_ = os.Rename(w.path, base+"-"+ts+ext)
-
-	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		return err
-	}
-	w.f = f
-	w.w = csv.NewWriter(f)
-	if err := w.w.Write(header); err != nil {
-		return err
-	}
-	w.w.Flush()
-	if s, serr := f.Stat(); serr == nil {
+// refreshSize reads the true file size. The caller must hold w.mu.
+func (w *Writer) refreshSize() {
+	if s, err := w.f.Stat(); err == nil {
 		w.size = s.Size()
-	} else {
-		w.size = 0
 	}
-	return w.w.Error()
 }
 
 // Path returns the CSV file path.
 func (w *Writer) Path() string { return w.path }
+
+// rotate renames the current file with a timestamp and starts a fresh one. If
+// the rename fails (commonly on Windows when the file is held open elsewhere),
+// it does NOT truncate — it keeps appending to the current file and defers the
+// next rotation attempt. The caller must hold w.mu.
+func (w *Writer) rotate() {
+	w.w.Flush()
+	if err := w.f.Close(); err != nil {
+		w.log.Warn("results CSV: close before rotate failed", "err", err)
+	}
+
+	ts := time.Now().Format("20060102-150405")
+	ext := filepath.Ext(w.path)
+	base := w.path[:len(w.path)-len(ext)]
+	rotated := base + "-" + ts + ext
+
+	if err := os.Rename(w.path, rotated); err != nil {
+		// Preserve data: reopen the SAME file for append (no truncation) and try
+		// again after it grows another maxBytes.
+		w.log.Warn("results CSV: rotation rename failed; continuing on current file", "err", err)
+		f, oerr := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if oerr != nil {
+			w.log.Error("results CSV: reopen after failed rotate failed", "err", oerr)
+			return
+		}
+		w.f = f
+		w.w = csv.NewWriter(f)
+		w.refreshSize()
+		w.rotateAt = w.size + maxBytes
+		return
+	}
+
+	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		w.log.Error("results CSV: open fresh file after rotate failed", "err", err)
+		return
+	}
+	w.f = f
+	w.w = csv.NewWriter(f)
+	if err := w.w.Write(header); err != nil {
+		w.log.Warn("results CSV: header write after rotate failed", "err", err)
+	}
+	w.w.Flush()
+	w.refreshSize()
+	w.rotateAt = maxBytes
+	w.log.Info("results CSV rotated", "archived", rotated)
+}
 
 // Write appends one result row and flushes.
 func (w *Writer) Write(r metrics.ResultSummary) error {
@@ -110,11 +139,10 @@ func (w *Writer) Write(r metrics.ResultSummary) error {
 	if w.closed {
 		return ErrClosed
 	}
-	if w.size >= maxBytes {
-		if err := w.rotate(); err != nil {
-			return err
-		}
+	if w.size >= w.rotateAt {
+		w.rotate()
 	}
+
 	top := ""
 	if len(r.TopTitles) > 0 {
 		top = r.TopTitles[0]
@@ -129,18 +157,9 @@ func (w *Writer) Write(r metrics.ResultSummary) error {
 	}
 	rec := []string{
 		r.Time.Format("2006-01-02T15:04:05Z07:00"),
-		r.Mode,
-		r.Kind,
-		r.Query,
-		strconv.Itoa(r.Status),
-		strconv.Itoa(r.Count),
-		strconv.FormatInt(r.LatencyMS, 10),
-		strconv.FormatBool(r.OK),
-		assert,
-		r.AssertMsg,
-		r.Note,
-		r.Err,
-		top,
+		r.Mode, r.Kind, r.Query,
+		strconv.Itoa(r.Status), strconv.Itoa(r.Count), strconv.FormatInt(r.LatencyMS, 10),
+		strconv.FormatBool(r.OK), assert, r.AssertMsg, r.Note, r.Err, top,
 	}
 	if err := w.w.Write(rec); err != nil {
 		return err
@@ -149,11 +168,7 @@ func (w *Writer) Write(r metrics.ResultSummary) error {
 	if err := w.w.Error(); err != nil {
 		return err
 	}
-	// Approximate the on-disk growth for the rotation check.
-	for _, f := range rec {
-		w.size += int64(len(f)) + 1
-	}
-	w.size++ // newline
+	w.refreshSize() // accurate size (accounts for CSV quoting), not an estimate
 	return nil
 }
 

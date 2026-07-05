@@ -34,6 +34,10 @@ const (
 	GenPhrases   = "phrases"   // multi-word phrases
 	GenQuestions = "questions" // natural-language questions
 	GenMixed     = "mixed"     // a rotating mix of the above
+	// GenRealistic draws from a curated corpus of real-world-style queries with
+	// head-weighted (Zipfian-like) sampling across search intents, so the
+	// traffic shape resembles genuine search demand rather than templates.
+	GenRealistic = "realistic"
 )
 
 // Query sources.
@@ -394,7 +398,7 @@ func (c *Config) Sanitize() {
 		c.UserAgent = Default().UserAgent
 	}
 	switch c.Generation.Mode {
-	case GenTerms, GenPhrases, GenQuestions, GenMixed:
+	case GenTerms, GenPhrases, GenQuestions, GenMixed, GenRealistic:
 	default:
 		c.Generation.Mode = GenMixed
 	}

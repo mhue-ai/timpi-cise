@@ -19,10 +19,15 @@ func TestHostIsLocal(t *testing.T) {
 
 func TestOriginMatchesHost(t *testing.T) {
 	if !originMatchesHost("http://127.0.0.1:8770", "127.0.0.1:8770") {
-		t.Error("same-origin should match")
+		t.Error("exact same-origin should match")
 	}
-	if !originMatchesHost("http://localhost:8770", "127.0.0.1:8770") {
-		t.Error("loopback origin should be allowed")
+	// Only an EXACT host:port match is allowed — a different local port must not
+	// pass (prevents a rogue local service from forging requests).
+	if originMatchesHost("http://127.0.0.1:9999", "127.0.0.1:8770") {
+		t.Error("different local port must NOT match")
+	}
+	if originMatchesHost("http://localhost:8770", "127.0.0.1:8770") {
+		t.Error("different host name must NOT match")
 	}
 	if originMatchesHost("https://evil.com", "127.0.0.1:8770") {
 		t.Error("cross-origin should not match")
