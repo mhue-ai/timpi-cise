@@ -44,6 +44,7 @@ async function refresh() {
     $("mMode").textContent = `${d.mode} · ${d.adapter}`;
     renderSparklines(m.series || []);
 
+    renderAlerts(d.alerts || []);
     $("logDir").textContent = d.log_dir || "—";
     $("csvPath").textContent = d.results_csv_path || "(disabled)";
 
@@ -75,6 +76,14 @@ async function refresh() {
 
 function hostOf(u) {
   try { return new URL(u).host; } catch { return ""; }
+}
+
+function renderAlerts(alerts) {
+  const b = $("alertBanner");
+  if (!alerts.length) { b.classList.add("hidden"); b.innerHTML = ""; return; }
+  b.classList.remove("hidden");
+  b.innerHTML = `<strong>⚠ ${alerts.length} alert${alerts.length > 1 ? "s" : ""} firing:</strong> ` +
+    alerts.map(esc).join(" · ");
 }
 
 // renderSparklines draws two inline SVG polylines (avg latency and success rate)
@@ -266,10 +275,21 @@ async function loadConfig() {
 
   $("appLog").checked = c.logging.app_log;
   $("csvResults").checked = c.logging.csv_results;
+  $("persistMetrics").checked = c.logging.persist_metrics;
 
   $("assertEnabled").checked = c.assertions.enabled;
   $("assertLatency").value = c.assertions.max_latency_ms;
   $("assertMinResults").value = c.assertions.min_results;
+
+  const al = c.alerts || {};
+  $("alertEnabled").checked = al.enabled;
+  $("alertWebhook").value = al.webhook_url || "";
+  $("alertWindow").value = al.window_queries || 20;
+  $("alertErr").value = Math.round((al.max_error_rate || 0) * 100);
+  $("alertZero").value = Math.round((al.max_zero_result_rate || 0) * 100);
+  $("alertAssert").value = Math.round((al.max_assert_fail_rate || 0) * 100);
+  $("alertP95").value = al.max_p95_ms || 0;
+  $("alertCooldown").value = al.cooldown_seconds || 300;
 
   toggleBoxes();
 }
@@ -356,11 +376,22 @@ $("cfgForm").addEventListener("submit", async (e) => {
       dir: c.logging.dir,
       app_log: $("appLog").checked,
       csv_results: $("csvResults").checked,
+      persist_metrics: $("persistMetrics").checked,
     },
     assertions: {
       enabled: $("assertEnabled").checked,
       max_latency_ms: parseInt($("assertLatency").value, 10) || 0,
       min_results: parseInt($("assertMinResults").value, 10) || 0,
+    },
+    alerts: {
+      enabled: $("alertEnabled").checked,
+      webhook_url: $("alertWebhook").value.trim(),
+      window_queries: parseInt($("alertWindow").value, 10) || 20,
+      max_error_rate: (parseInt($("alertErr").value, 10) || 0) / 100,
+      max_zero_result_rate: (parseInt($("alertZero").value, 10) || 0) / 100,
+      max_assert_fail_rate: (parseInt($("alertAssert").value, 10) || 0) / 100,
+      max_p95_ms: parseInt($("alertP95").value, 10) || 0,
+      cooldown_seconds: parseInt($("alertCooldown").value, 10) || 300,
     },
   };
 

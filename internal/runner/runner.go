@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mhue-ai/timpi-cise/internal/alert"
 	"github.com/mhue-ai/timpi-cise/internal/config"
 	"github.com/mhue-ai/timpi-cise/internal/generate"
 	"github.com/mhue-ai/timpi-cise/internal/metrics"
@@ -33,6 +34,7 @@ type Runner struct {
 	gen     *generate.Generator
 	adapter search.Adapter
 	met     *metrics.Metrics
+	alerter *alert.Alerter
 	res     *reslog.Writer
 	running bool
 	stopCh  chan struct{}
@@ -52,9 +54,18 @@ func New(cfg config.Config, cfgPath string, met *metrics.Metrics, log *slog.Logg
 		gen:     generate.New(cfg.Generation, log),
 		adapter: search.Build(cfg),
 		met:     met,
+		alerter: alert.New(cfg.Alerts, log),
 	}
 	r.applyResultsLog(cfg)
 	return r
+}
+
+// ActiveAlerts returns the currently-firing alert messages.
+func (r *Runner) ActiveAlerts() []string {
+	r.mu.Lock()
+	a := r.alerter
+	r.mu.Unlock()
+	return a.Active()
 }
 
 // Config returns a copy of the current config.
@@ -112,6 +123,7 @@ func (r *Runner) UpdateConfig(c config.Config) error {
 	r.cfg = c
 	r.gen = generate.New(c.Generation, r.log)
 	r.adapter = search.Build(c)
+	r.alerter = alert.New(c.Alerts, r.log)
 	r.fails = 0
 	path := r.cfgPath
 	r.mu.Unlock()
@@ -251,6 +263,7 @@ func (r *Runner) step(stop <-chan struct{}) time.Duration {
 	adapter := r.adapter
 	cfg := r.cfg
 	res := r.res
+	alerter := r.alerter
 	r.mu.Unlock()
 
 	// Bound the whole query (including any optional model generation) so a hung
@@ -311,6 +324,7 @@ func (r *Runner) step(stop <-chan struct{}) time.Duration {
 	if summary.AssertPass != nil && !*summary.AssertPass {
 		r.log.Warn("assertion failed", "query", q.Text, "detail", summary.AssertMsg)
 	}
+	alerter.Check(r.met)
 
 	return r.nextWait(cfg, err == nil, result.RetryAfter)
 }

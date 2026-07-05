@@ -93,6 +93,11 @@ func run() error {
 	}
 
 	met := metrics.New(50)
+	if cfg.Logging.PersistMetrics {
+		if err := met.LoadFrom(cfg.MetricsPath()); err != nil {
+			logger.Warn("could not load persisted metrics", "err", err)
+		}
+	}
 	run := runner.New(cfg, *cfgPath, met, logger)
 	defer run.Close()
 	srv := server.New(run, met, logger, version, allowLAN)
@@ -128,6 +133,24 @@ func run() error {
 		}
 	}()
 
+	// Periodically persist metrics so a crash loses at most one interval.
+	if cfg.Logging.PersistMetrics {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := met.SaveTo(cfg.MetricsPath()); err != nil {
+						logger.Warn("metrics save failed", "err", err)
+					}
+				}
+			}
+		}()
+	}
+
 	var fatal error
 	select {
 	case <-ctx.Done():
@@ -137,6 +160,11 @@ func run() error {
 		fatal = err
 	}
 
+	if cfg.Logging.PersistMetrics {
+		if err := met.SaveTo(cfg.MetricsPath()); err != nil {
+			logger.Warn("final metrics save failed", "err", err)
+		}
+	}
 	run.Stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

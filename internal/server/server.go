@@ -150,6 +150,7 @@ type statusResp struct {
 	CSVError       string           `json:"csv_error,omitempty"`
 	ResultsCSVPath string           `json:"results_csv_path"`
 	LogDir         string           `json:"log_dir"`
+	Alerts         []string         `json:"alerts"`
 	Metrics        metrics.Snapshot `json:"metrics"`
 }
 
@@ -164,6 +165,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		CSVError:       errMsg,
 		ResultsCSVPath: s.run.ResultsCSVPath(),
 		LogDir:         cfg.Logging.Dir,
+		Alerts:         s.run.ActiveAlerts(),
 		Metrics:        s.met.Snapshot(),
 	})
 }

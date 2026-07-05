@@ -94,6 +94,34 @@ type Config struct {
 	// Assertions turn the tool from a traffic generator into a monitor: each
 	// query is checked against expectations and reported pass/fail.
 	Assertions Assertions `json:"assertions"`
+
+	// Alerts fire when windowed health metrics breach thresholds.
+	Alerts Alerts `json:"alerts"`
+}
+
+// Alerts define health thresholds evaluated over a sliding window of recent
+// queries. On a breach the tool logs an error, surfaces the alert on the
+// dashboard, and (optionally) POSTs to a webhook (Slack/Discord/generic).
+type Alerts struct {
+	// Enabled turns alerting on.
+	Enabled bool `json:"enabled"`
+
+	// WebhookURL receives a JSON POST on each alert transition. Compatible with
+	// Slack ("text") and Discord ("content") incoming webhooks. Empty = log only.
+	WebhookURL string `json:"webhook_url"`
+
+	// WindowQueries is how many recent queries the rates are computed over.
+	WindowQueries int `json:"window_queries"`
+
+	// Thresholds (0 = that check is disabled).
+	MaxErrorRate      float64 `json:"max_error_rate"`       // 0..1
+	MaxZeroResultRate float64 `json:"max_zero_result_rate"` // 0..1
+	MaxAssertFailRate float64 `json:"max_assert_fail_rate"` // 0..1
+	MaxP95MS          int     `json:"max_p95_ms"`
+
+	// CooldownSeconds is the minimum time between repeat notifications for a
+	// still-firing alert.
+	CooldownSeconds int `json:"cooldown_seconds"`
 }
 
 // Assertions define health expectations evaluated on every executed query.
@@ -181,6 +209,10 @@ type Logging struct {
 
 	// CSVResults enables appending each executed query result to a CSV file.
 	CSVResults bool `json:"csv_results"`
+
+	// PersistMetrics saves aggregate metrics to disk so counters and trends
+	// survive a restart.
+	PersistMetrics bool `json:"persist_metrics"`
 }
 
 // PublicWeb configures how the tool talks to the public search interface.
@@ -292,6 +324,11 @@ func (c Config) AppLogPath() string {
 	return filepath.Join(c.Logging.Dir, "timpicise.log")
 }
 
+// MetricsPath is where persisted metrics are stored.
+func (c Config) MetricsPath() string {
+	return filepath.Join(c.Logging.Dir, "metrics.json")
+}
+
 // Default returns a safe default configuration: dry-run mode, one query per
 // minute, mixed generation, dashboard on loopback.
 func Default() Config {
@@ -342,8 +379,9 @@ func Default() Config {
 		},
 		Server: Server{Addr: "127.0.0.1:8770"},
 		Logging: Logging{
-			AppLog:     true,
-			CSVResults: true,
+			AppLog:         true,
+			CSVResults:     true,
+			PersistMetrics: true,
 		},
 	}
 }
@@ -438,6 +476,22 @@ func (c *Config) Sanitize() {
 	}
 	if c.Assertions.MinResults < 0 {
 		c.Assertions.MinResults = 0
+	}
+	if c.Alerts.WindowQueries <= 0 {
+		c.Alerts.WindowQueries = 20
+	}
+	if c.Alerts.CooldownSeconds <= 0 {
+		c.Alerts.CooldownSeconds = 300
+	}
+	for _, r := range []*float64{&c.Alerts.MaxErrorRate, &c.Alerts.MaxZeroResultRate, &c.Alerts.MaxAssertFailRate} {
+		if *r < 0 {
+			*r = 0
+		} else if *r > 1 {
+			*r = 1
+		}
+	}
+	if c.Alerts.MaxP95MS < 0 {
+		c.Alerts.MaxP95MS = 0
 	}
 	if strings.TrimSpace(c.PublicWeb.Method) == "" {
 		c.PublicWeb.Method = "GET"

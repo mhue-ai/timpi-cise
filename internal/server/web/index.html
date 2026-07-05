@@ -23,6 +23,8 @@
   </header>
 
   <main>
+    <div id="alertBanner" class="alertbanner hidden" role="alert" aria-live="assertive"></div>
+
     <section class="cards">
       <div class="card"><div class="k">Queries sent</div><div id="mSent" class="v">0</div></div>
       <div class="card"><div class="k">Successful</div><div id="mOK" class="v ok">0</div></div>
@@ -238,9 +240,36 @@
           </fieldset>
 
           <fieldset class="sub">
+            <legend>alerts (notify on health breaches)</legend>
+            <label class="check"><input id="alertEnabled" type="checkbox" /> Enable alerting</label>
+            <label>Webhook URL (Slack/Discord/generic — optional)
+              <input id="alertWebhook" type="text" placeholder="https://hooks.slack.com/…" />
+            </label>
+            <label>Evaluate over last N queries
+              <input id="alertWindow" type="number" min="5" max="50" step="1" value="20" />
+            </label>
+            <label>Max error rate % (0 = off)
+              <input id="alertErr" type="number" min="0" max="100" step="5" value="0" />
+            </label>
+            <label>Max zero-result rate % (0 = off)
+              <input id="alertZero" type="number" min="0" max="100" step="5" value="0" />
+            </label>
+            <label>Max assertion-failure rate % (0 = off)
+              <input id="alertAssert" type="number" min="0" max="100" step="5" value="0" />
+            </label>
+            <label>Max p95 latency ms (0 = off)
+              <input id="alertP95" type="number" min="0" step="100" value="0" />
+            </label>
+            <label>Re-notify cooldown (seconds)
+              <input id="alertCooldown" type="number" min="30" step="30" value="300" />
+            </label>
+          </fieldset>
+
+          <fieldset class="sub">
             <legend>logging</legend>
             <label class="check"><input id="appLog" type="checkbox" /> Write app log file</label>
             <label class="check"><input id="csvResults" type="checkbox" /> Log every result to CSV</label>
+            <label class="check"><input id="persistMetrics" type="checkbox" /> Persist metrics across restarts</label>
             <p class="hint">Log folder: <code id="logDir">—</code></p>
             <p class="hint">Results CSV: <code id="csvPath">—</code></p>
             <a id="dlCsv" class="btn btn-save" href="/api/results.csv" download>Download results CSV</a>
