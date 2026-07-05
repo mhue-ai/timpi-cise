@@ -49,6 +49,17 @@ type Generator struct {
 	csvErr error
 }
 
+// ListModels queries a model server for the models it has available. provider is
+// config.LLMOllama or config.LLMOpenAI; baseURL/apiKey identify the server.
+func ListModels(ctx context.Context, provider, baseURL, apiKey string) ([]string, error) {
+	switch provider {
+	case config.LLMOpenAI:
+		return newOpenAIClient(baseURL, "", apiKey).listModels(ctx)
+	default:
+		return newOllamaClient(baseURL, "").listModels(ctx)
+	}
+}
+
 // New builds a Generator. If the CSV source is selected it is loaded eagerly so
 // any error is visible immediately (and logged); the optional model client is
 // created only when generation is enabled.

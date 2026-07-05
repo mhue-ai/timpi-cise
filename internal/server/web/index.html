@@ -151,8 +151,13 @@
               <input id="llmBaseURL" type="text" placeholder="http://localhost:11434" />
             </label>
             <label>Model
-              <input id="llmModel" type="text" placeholder="llama3.2" />
+              <input id="llmModel" type="text" list="llmModels" placeholder="llama3.2 — or fetch installed models →" />
+              <datalist id="llmModels"></datalist>
             </label>
+            <div class="modelrow">
+              <button type="button" id="fetchModels" class="btn btn-save">↻ Fetch installed models</button>
+              <span id="modelStatus" class="hint"></span>
+            </div>
             <label>API key <span id="llmKeyState" class="hint"></span>
               <input id="llmKey" type="password" placeholder="optional — most local servers ignore it" />
             </label>
