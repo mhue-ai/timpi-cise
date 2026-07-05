@@ -126,7 +126,22 @@ type LLM struct {
 	// APIKey is an optional bearer token for OpenAI-compatible servers that
 	// require one (most local servers ignore it).
 	APIKey string `json:"api_key"`
+
+	// Kinds selects which query types are produced by the model server rather
+	// than the built-in CPU generator. Any type left off falls back to the CPU
+	// generator. If the model server is unreachable, every type falls back.
+	Kinds LLMKinds `json:"kinds"`
 }
+
+// LLMKinds is a per-type CPU-vs-model switch.
+type LLMKinds struct {
+	Terms     bool `json:"terms"`     // short terms
+	Phrases   bool `json:"phrases"`   // long terms / phrases
+	Questions bool `json:"questions"` // natural-language questions
+}
+
+// Any reports whether at least one type is routed to the model.
+func (k LLMKinds) Any() bool { return k.Terms || k.Phrases || k.Questions }
 
 // Logging controls the app log and the CSV results log.
 type Logging struct {
@@ -240,6 +255,7 @@ func Default() Config {
 				Provider: LLMOllama,
 				BaseURL:  "http://localhost:11434",
 				Model:    "llama3.2",
+				Kinds:    LLMKinds{Questions: true},
 			},
 		},
 		PublicWeb: PublicWeb{
@@ -337,6 +353,11 @@ func (c *Config) Sanitize() {
 	}
 	if strings.TrimSpace(c.Generation.LLM.Model) == "" {
 		c.Generation.LLM.Model = "llama3.2"
+	}
+	// If the model is enabled but no type is routed to it, route questions so
+	// enabling it always does something.
+	if c.Generation.LLM.Enabled && !c.Generation.LLM.Kinds.Any() {
+		c.Generation.LLM.Kinds.Questions = true
 	}
 	if strings.TrimSpace(c.Server.Addr) == "" {
 		c.Server.Addr = "127.0.0.1:8770"

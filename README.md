@@ -100,20 +100,31 @@ how does decentralized search work?,questions
 solar panel payback period,phrases
 ```
 
-### Optional: model server for advanced questions
+### Optional: model server for any/all types
 
-Enable **"Use a local model server for advanced questions"** to generate richer,
-more varied questions. Two providers are supported:
+Enable **"Use a local model server for advanced questions"** to have a model
+generate queries. It can produce **all three types** — short terms, long
+phrases, and questions — and you pick per type whether it comes from the
+**model** or the **built-in CPU generator**:
+
+| Type | Built-in (CPU) | Model server |
+|------|:--------------:|:------------:|
+| short terms | ✅ | ✅ (tick "short terms") |
+| long phrases | ✅ | ✅ (tick "long phrases") |
+| questions | ✅ | ✅ (tick "questions") |
+
+Any type left unticked uses the CPU generator. If the server is unreachable,
+**every** type falls back to CPU automatically — so this stays optional and the
+binary stays tiny (no model is ever bundled).
+
+Two providers are supported:
 
 - **Ollama (native)** — [ollama.com](https://ollama.com); default `http://localhost:11434`.
+  Uses your GPU if one is attached, else CPU.
 - **OpenAI-compatible** — any server exposing `/v1/chat/completions`, including
   **LM Studio, llama.cpp's server, Jan, LocalAI, vLLM, text-generation-webui**,
   or a hosted API. Default base URL `http://localhost:1234/v1`. An API key field
   is available for servers that require one.
-
-If the server is unreachable the tool silently falls back to the built-in
-template generator — so this stays optional and the binary stays tiny (no model
-is ever bundled).
 
 ## Logging
 

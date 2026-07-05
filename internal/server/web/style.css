@@ -73,6 +73,9 @@ body {
 .btn-save { background: #16243d; border-color: #274b82; color: #9dc0ff; }
 a.btn { display: inline-block; text-decoration: none; }
 input[type="file"] { padding: 6px; font-size: 13px; }
+.kinds { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.kinds .hint { width: 100%; margin: 0; }
+.kinds .check { color: var(--text); }
 
 main { padding: 22px; max-width: 1200px; margin: 0 auto; }
 

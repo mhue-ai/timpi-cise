@@ -39,14 +39,9 @@ type ollamaResp struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// question asks the model for a single realistic search question about topic.
-// A high temperature is used for varied, "advanced" randomization.
-func (c *ollamaClient) question(ctx context.Context, topic string) (string, error) {
-	prompt := fmt.Sprintf(
-		"Generate ONE realistic, specific search-engine question a curious person "+
-			"might type about \"%s\". Reply with only the question, no quotes, no preamble.",
-		topic,
-	)
+// complete runs a prompt through Ollama's native generate endpoint. A high
+// temperature is used for varied, "advanced" randomization.
+func (c *ollamaClient) complete(ctx context.Context, prompt string, maxTokens int) (string, error) {
 	body, _ := json.Marshal(ollamaReq{
 		Model:  c.model,
 		Prompt: prompt,
@@ -54,7 +49,7 @@ func (c *ollamaClient) question(ctx context.Context, topic string) (string, erro
 		Options: map[string]any{
 			"temperature": 1.1,
 			"top_p":       0.95,
-			"num_predict": 40,
+			"num_predict": maxTokens,
 		},
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/generate", bytes.NewReader(body))

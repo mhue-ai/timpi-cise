@@ -20,9 +20,10 @@ type Query struct {
 	Kind string // config.GenTerms | GenPhrases | GenQuestions
 }
 
-// llmClient is a model backend that can turn a topic into a question.
+// llmClient is a model backend that completes a prompt. The generator builds
+// kind-specific prompts and asks the client to complete them.
 type llmClient interface {
-	question(ctx context.Context, topic string) (string, error)
+	complete(ctx context.Context, prompt string, maxTokens int) (string, error)
 }
 
 // Generator produces queries according to a configuration.
@@ -85,20 +86,72 @@ func (g *Generator) Next(ctx context.Context) Query {
 	}
 	switch kind {
 	case config.GenTerms:
-		return Query{Text: g.term(), Kind: config.GenTerms}
+		return Query{Text: g.term(ctx), Kind: config.GenTerms}
 	case config.GenPhrases:
-		return Query{Text: g.phrase(), Kind: config.GenPhrases}
+		return Query{Text: g.phrase(ctx), Kind: config.GenPhrases}
 	case config.GenQuestions:
 		return Query{Text: g.question(ctx), Kind: config.GenQuestions}
 	default:
-		return Query{Text: g.term(), Kind: config.GenTerms}
+		return Query{Text: g.term(ctx), Kind: config.GenTerms}
+	}
+}
+
+// useModel reports whether the given kind should be produced by the model.
+func (g *Generator) useModel(kind string) bool {
+	if g.llm == nil {
+		return false
+	}
+	switch kind {
+	case config.GenTerms:
+		return g.cfg.LLM.Kinds.Terms
+	case config.GenPhrases:
+		return g.cfg.LLM.Kinds.Phrases
+	case config.GenQuestions:
+		return g.cfg.LLM.Kinds.Questions
+	}
+	return false
+}
+
+// fromModel builds a kind-specific prompt, calls the model, and returns a clean
+// one-line result. It returns "" (caller falls back to CPU) on any error.
+func (g *Generator) fromModel(ctx context.Context, kind, topic string) string {
+	prompt, maxTok := promptFor(kind, topic)
+	out, err := g.llm.complete(ctx, prompt, maxTok)
+	if err != nil {
+		return ""
+	}
+	return sanitizeOneLine(out)
+}
+
+func promptFor(kind, topic string) (prompt string, maxTokens int) {
+	switch kind {
+	case config.GenTerms:
+		return fmt.Sprintf(
+			"Give ONE short web search term (1-3 words) related to \"%s\". "+
+				"Reply with only the term, lowercase, no punctuation, no quotes.", topic), 12
+	case config.GenPhrases:
+		return fmt.Sprintf(
+			"Give ONE natural multi-word search phrase (4-8 words) someone might "+
+				"type about \"%s\". Reply with only the phrase, no quotes.", topic), 24
+	default: // questions
+		return fmt.Sprintf(
+			"Generate ONE realistic, specific search-engine question a curious "+
+				"person might type about \"%s\". Reply with only the question, no "+
+				"quotes, no preamble.", topic), 40
 	}
 }
 
 func (g *Generator) pick(s []string) string { return s[g.rng.IntN(len(s))] }
 
-// term returns a short generic query: a topic, optionally narrowed by a noun.
-func (g *Generator) term() string {
+// term returns a short generic query. When the model is routed for terms and
+// reachable it is used; otherwise the CPU generator produces a topic, optionally
+// narrowed by a noun.
+func (g *Generator) term(ctx context.Context) string {
+	if g.useModel(config.GenTerms) {
+		if t := g.fromModel(ctx, config.GenTerms, g.pick(topics)); t != "" {
+			return t
+		}
+	}
 	t := g.pick(topics)
 	if g.rng.IntN(2) == 0 {
 		return t
@@ -106,8 +159,14 @@ func (g *Generator) term() string {
 	return t + " " + g.pick(nouns)
 }
 
-// phrase returns a multi-word phrase from a template.
-func (g *Generator) phrase() string {
+// phrase returns a multi-word phrase, from the model when routed for phrases and
+// reachable, else from a CPU template.
+func (g *Generator) phrase(ctx context.Context) string {
+	if g.useModel(config.GenPhrases) {
+		if p := g.fromModel(ctx, config.GenPhrases, g.pick(topics)); p != "" {
+			return p
+		}
+	}
 	tmpl := g.pick(phraseTemplates)
 	adj := g.pick(adjectives)
 	topic := g.pick(topics)
@@ -122,14 +181,12 @@ func (g *Generator) phrase() string {
 	}
 }
 
-// question returns a natural-language question. When a model client is enabled
-// and reachable it is used for a richer question; otherwise a template is filled
-// in. Any model error falls back silently to the template.
+// question returns a natural-language question, from the model when routed for
+// questions and reachable, else from a CPU template.
 func (g *Generator) question(ctx context.Context) string {
-	if g.llm != nil {
-		topic := g.pick(topics)
-		if q, err := g.llm.question(ctx, topic); err == nil && strings.TrimSpace(q) != "" {
-			return sanitizeOneLine(q)
+	if g.useModel(config.GenQuestions) {
+		if q := g.fromModel(ctx, config.GenQuestions, g.pick(topics)); q != "" {
+			return q
 		}
 	}
 	tmpl := g.pick(questionTemplates)

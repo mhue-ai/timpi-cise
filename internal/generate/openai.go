@@ -54,12 +54,7 @@ type oaResp struct {
 	} `json:"error,omitempty"`
 }
 
-func (c *openaiClient) question(ctx context.Context, topic string) (string, error) {
-	prompt := fmt.Sprintf(
-		"Generate ONE realistic, specific search-engine question a curious person "+
-			"might type about \"%s\". Reply with only the question, no quotes, no preamble.",
-		topic,
-	)
+func (c *openaiClient) complete(ctx context.Context, prompt string, maxTokens int) (string, error) {
 	body, _ := json.Marshal(oaReq{
 		Model: c.model,
 		Messages: []oaMessage{
@@ -67,7 +62,7 @@ func (c *openaiClient) question(ctx context.Context, topic string) (string, erro
 		},
 		Temperature: 1.1,
 		TopP:        0.95,
-		MaxTokens:   40,
+		MaxTokens:   maxTokens,
 		Stream:      false,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))

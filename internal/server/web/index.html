@@ -122,6 +122,13 @@
             <label>API key <span id="llmKeyState" class="hint"></span>
               <input id="llmKey" type="password" placeholder="optional — most local servers ignore it" />
             </label>
+            <div class="kinds">
+              <span class="hint">Use the model for:</span>
+              <label class="check"><input id="llmTerms" type="checkbox" /> short terms</label>
+              <label class="check"><input id="llmPhrases" type="checkbox" /> long phrases</label>
+              <label class="check"><input id="llmQuestions" type="checkbox" /> questions</label>
+              <p class="hint">Unticked types use the built-in CPU generator. If the server is unreachable, all types fall back to CPU.</p>
+            </div>
           </fieldset>
 
           <fieldset id="webBox" class="sub hidden">

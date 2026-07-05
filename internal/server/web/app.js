@@ -151,6 +151,10 @@ async function loadConfig() {
   $("llmBaseURL").value = c.generation.llm.base_url || "";
   $("llmModel").value = c.generation.llm.model || "";
   $("llmKeyState").textContent = c.llm_key_set ? "(saved — blank keeps it)" : "";
+  const kinds = c.generation.llm.kinds || {};
+  $("llmTerms").checked = !!kinds.terms;
+  $("llmPhrases").checked = !!kinds.phrases;
+  $("llmQuestions").checked = !!kinds.questions;
 
   $("webEndpoint").value = c.public_web.endpoint || "";
   $("webMethod").value = c.public_web.method || "GET";
@@ -209,6 +213,11 @@ $("cfgForm").addEventListener("submit", async (e) => {
         base_url: $("llmBaseURL").value.trim(),
         model: $("llmModel").value.trim(),
         api_key: $("llmKey").value, // blank preserves existing
+        kinds: {
+          terms: $("llmTerms").checked,
+          phrases: $("llmPhrases").checked,
+          questions: $("llmQuestions").checked,
+        },
       },
     },
     public_web: {
