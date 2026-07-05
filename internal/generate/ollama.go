@@ -74,17 +74,3 @@ func (c *ollamaClient) complete(ctx context.Context, prompt string, maxTokens in
 	}
 	return out.Response, nil
 }
-
-// Available reports whether the Ollama server responds to a version probe.
-func (c *ollamaClient) Available(ctx context.Context) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/version", nil)
-	if err != nil {
-		return false
-	}
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
-}

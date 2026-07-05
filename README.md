@@ -180,6 +180,9 @@ Requires [Go](https://go.dev/dl/) 1.26+.
 # Build for your current platform
 go build -o timpicise ./cmd/timpicise
 
+# Run the tests
+go test ./...
+
 # Cross-compile every supported target into ./dist
 ./build.sh
 ```

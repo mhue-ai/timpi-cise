@@ -8,6 +8,7 @@ import (
 	"context"
 	"log/slog"
 	"math/rand/v2"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -46,7 +47,7 @@ func New(cfg config.Config, cfgPath string, met *metrics.Metrics, log *slog.Logg
 		cfg:     cfg,
 		cfgPath: cfgPath,
 		log:     log,
-		gen:     generate.New(cfg.Generation),
+		gen:     generate.New(cfg.Generation, log),
 		adapter: search.Build(cfg),
 		met:     met,
 	}
@@ -106,7 +107,7 @@ func (r *Runner) UpdateConfig(c config.Config) error {
 	}
 	r.mu.Lock()
 	r.cfg = c
-	r.gen = generate.New(c.Generation)
+	r.gen = generate.New(c.Generation, r.log)
 	r.adapter = search.Build(c)
 	r.fails = 0
 	path := r.cfgPath
@@ -134,7 +135,9 @@ func (r *Runner) applyResultsLog(c config.Config) {
 
 	if !want {
 		if cur != nil {
-			_ = cur.Close()
+			if err := cur.Close(); err != nil {
+				r.log.Warn("closing results CSV failed", "path", curPath, "err", err)
+			}
 			r.mu.Lock()
 			r.res = nil
 			r.mu.Unlock()
@@ -145,7 +148,9 @@ func (r *Runner) applyResultsLog(c config.Config) {
 		return // already open at the right path
 	}
 	if cur != nil {
-		_ = cur.Close()
+		if err := cur.Close(); err != nil {
+			r.log.Warn("closing results CSV failed", "path", curPath, "err", err)
+		}
 	}
 	w, err := reslog.Open(wantPath)
 	if err != nil {
@@ -177,10 +182,12 @@ func (r *Runner) Start() error {
 	r.fails = 0
 	stop := make(chan struct{})
 	r.stopCh = stop
+	mode := r.cfg.Mode
+	poll := r.cfg.PollSeconds
 	r.mu.Unlock()
 
 	r.met.SetRunning(true)
-	r.log.Info("polling started", "mode", r.cfg.Mode, "poll_seconds", r.cfg.PollSeconds)
+	r.log.Info("polling started", "mode", mode, "poll_seconds", poll)
 	go r.loop(stop)
 	return nil
 }
@@ -208,7 +215,7 @@ func (r *Runner) loop(stop <-chan struct{}) {
 		default:
 		}
 
-		wait := r.step(stop)
+		wait := r.safeStep(stop)
 
 		select {
 		case <-stop:
@@ -216,6 +223,26 @@ func (r *Runner) loop(stop <-chan struct{}) {
 		case <-time.After(wait):
 		}
 	}
+}
+
+// safeStep runs one step with panic recovery so an unexpected failure in an
+// adapter or generator is logged rather than silently killing the loop. On a
+// panic it waits one base interval before retrying.
+func (r *Runner) safeStep(stop <-chan struct{}) (wait time.Duration) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			r.log.Error("recovered from panic in query step", "panic", rec, "stack", string(debug.Stack()))
+			r.mu.Lock()
+			r.fails++
+			base := time.Duration(r.cfg.PollSeconds) * time.Second
+			r.mu.Unlock()
+			if base < config.MinPollSeconds*time.Second {
+				base = config.MinPollSeconds * time.Second
+			}
+			wait = base
+		}
+	}()
+	return r.step(stop)
 }
 
 // step runs exactly one query and returns how long to wait before the next.
@@ -314,13 +341,16 @@ func (r *Runner) nextWait(cfg config.Config, ok bool, retryAfter time.Duration) 
 	return wait
 }
 
-// Close releases resources (the results log).
+// Close stops polling (if running) and releases resources (the results log).
 func (r *Runner) Close() {
+	r.Stop() // ensure the loop goroutine exits before we close its writer
 	r.mu.Lock()
 	res := r.res
 	r.res = nil
 	r.mu.Unlock()
 	if res != nil {
-		_ = res.Close()
+		if err := res.Close(); err != nil {
+			r.log.Warn("closing results CSV failed", "err", err)
+		}
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"net"
 	"os"
@@ -30,6 +29,15 @@ import (
 )
 
 func main() {
+	// run() owns all deferred cleanup (log flush, results-CSV close). main only
+	// translates its result into an exit code, so a fatal error still exits
+	// non-zero *after* cleanup has run.
+	if err := run(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	var (
 		cfgPath   = flag.String("config", defaultConfigPath(), "path to config file (created if missing)")
 		addr      = flag.String("addr", "", "override dashboard listen address (e.g. 127.0.0.1:8770)")
@@ -41,7 +49,16 @@ func main() {
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		// A corrupt or unreadable config must not prevent startup. Preserve the
+		// bad file for inspection and continue with defaults.
+		fmt.Fprintf(os.Stderr, "config load failed (%v); backing up to %s.bad and using defaults\n", err, *cfgPath)
+		if rerr := os.Rename(*cfgPath, *cfgPath+".bad"); rerr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not back up bad config: %v\n", rerr)
+		}
+		cfg = config.Default()
+		if serr := config.Save(*cfgPath, cfg); serr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not write fresh config: %v\n", serr)
+		}
 	}
 	if *addr != "" {
 		cfg.Server.Addr = *addr
@@ -60,7 +77,7 @@ func main() {
 
 	if *autostart {
 		if err := run.Start(); err != nil {
-			log.Printf("autostart skipped: %v", err)
+			logger.Warn("autostart skipped", "err", err)
 		}
 	}
 
@@ -73,22 +90,36 @@ func main() {
 		go openBrowserWhenReady(srv.Addr(), url)
 	}
 
-	// Graceful shutdown on signal.
+	// Graceful shutdown on signal or on a fatal server error. Using a channel
+	// (rather than os.Exit inside the goroutine) ensures the deferred cleanup —
+	// run.Close() and closeLog() — always runs so logs and the results CSV are
+	// flushed.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	serverErr := make(chan error, 1)
 	go func() {
 		if err := srv.Start(); err != nil {
-			log.Fatalf("server: %v", err)
+			serverErr <- err
 		}
 	}()
 
-	<-ctx.Done()
-	fmt.Println("\nshutting down…")
+	var fatal error
+	select {
+	case <-ctx.Done():
+		fmt.Println("\nshutting down…")
+	case err := <-serverErr:
+		logger.Error("dashboard server failed", "addr", cfg.Server.Addr, "err", err)
+		fatal = err
+	}
+
 	run.Stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_ = srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("server shutdown did not complete cleanly", "err", err)
+	}
+	return fatal
 }
 
 // setupLogging builds a slog.Logger that writes to stderr and, if enabled, to a
@@ -103,11 +134,13 @@ func setupLogging(cfg config.Config, verbose bool) (*slog.Logger, func()) {
 	closeFn := func() {}
 
 	if cfg.Logging.AppLog {
-		if err := os.MkdirAll(cfg.Logging.Dir, 0o755); err == nil {
-			if f, ferr := os.OpenFile(cfg.AppLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr == nil {
-				writers = append(writers, f)
-				closeFn = func() { _ = f.Close() }
-			}
+		if err := os.MkdirAll(cfg.Logging.Dir, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: cannot create log dir %q: %v (logging to terminal only)\n", cfg.Logging.Dir, err)
+		} else if f, ferr := os.OpenFile(cfg.AppLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr != nil {
+			fmt.Fprintf(os.Stderr, "warning: cannot open log file %q: %v (logging to terminal only)\n", cfg.AppLogPath(), ferr)
+		} else {
+			writers = append(writers, f)
+			closeFn = func() { _ = f.Close() }
 		}
 	}
 
@@ -165,7 +198,10 @@ func openBrowser(url string) {
 	default:
 		cmd, args = "xdg-open", []string{url}
 	}
-	_ = exec.Command(cmd, args...).Start()
+	if err := exec.Command(cmd, args...).Start(); err != nil {
+		// Non-fatal: the user can open the URL manually.
+		slog.Debug("could not open browser", "url", url, "err", err)
+	}
 }
 
 // ensure config dir exists is handled by config.Save via os.WriteFile failing

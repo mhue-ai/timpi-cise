@@ -37,18 +37,18 @@ type PreviewItem struct {
 type Metrics struct {
 	mu sync.RWMutex
 
-	startedAt   time.Time
-	sent        int64
-	ok          int64
-	failed      int64
-	totalLatMS  int64
-	lastLatMS   int64
-	byStatus    map[int]int64
-	lastQuery   string
-	lastAt      time.Time
-	running     bool
-	recent      []ResultSummary
-	recentMax   int
+	startedAt  time.Time
+	sent       int64
+	ok         int64
+	failed     int64
+	totalLatMS int64
+	lastLatMS  int64
+	byStatus   map[int]int64
+	lastQuery  string
+	lastAt     time.Time
+	running    bool
+	recent     []ResultSummary
+	recentMax  int
 }
 
 // New returns a Metrics keeping up to recentMax recent results.

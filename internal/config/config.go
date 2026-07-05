@@ -21,8 +21,8 @@ const MinPollSeconds = 60
 
 // Connection modes.
 const (
-	ModeDryRun     = "dry-run"     // generate queries, never touch the network (default)
-	ModePublicWeb  = "public-web"  // exercise the public timpi.com search interface
+	ModeDryRun      = "dry-run"      // generate queries, never touch the network (default)
+	ModePublicWeb   = "public-web"   // exercise the public timpi.com search interface
 	ModeOfficialAPI = "official-api" // use an authenticated Timpi Data API endpoint
 )
 

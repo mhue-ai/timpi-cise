@@ -8,6 +8,7 @@ package generate
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"strings"
 
@@ -28,10 +29,16 @@ type llmClient interface {
 
 // Generator produces queries according to a configuration.
 type Generator struct {
-	cfg  config.Generation
-	rng  *rand.Rand
-	llm  llmClient
+	cfg    config.Generation
+	rng    *rand.Rand
+	llm    llmClient
+	log    *slog.Logger
 	rotate int
+
+	// modelWarned suppresses repeat "model unreachable" warnings after the
+	// first failure so a down server doesn't flood the log every minute; it is
+	// reset once a call succeeds.
+	modelWarned bool
 
 	// CSV source state.
 	csv    []Query
@@ -40,15 +47,23 @@ type Generator struct {
 }
 
 // New builds a Generator. If the CSV source is selected it is loaded eagerly so
-// any error is visible immediately; the optional model client is created only
-// when generation is enabled.
-func New(cfg config.Generation) *Generator {
+// any error is visible immediately (and logged); the optional model client is
+// created only when generation is enabled.
+func New(cfg config.Generation, log *slog.Logger) *Generator {
+	if log == nil {
+		log = slog.Default()
+	}
 	src := rand.NewPCG(rand.Uint64(), rand.Uint64())
-	g := &Generator{cfg: cfg, rng: rand.New(src)}
+	g := &Generator{cfg: cfg, rng: rand.New(src), log: log}
 
 	if cfg.Source == config.SourceCSV {
 		q, err := loadCSV(cfg.CSVPath, cfg.Shuffle, g.rng)
 		g.csv, g.csvErr = q, err
+		if err != nil {
+			g.log.Error("could not load CSV term list", "path", cfg.CSVPath, "err", err)
+		} else {
+			g.log.Info("loaded CSV term list", "path", cfg.CSVPath, "queries", len(q))
+		}
 	}
 
 	if cfg.LLM.Enabled {
@@ -113,14 +128,32 @@ func (g *Generator) useModel(kind string) bool {
 }
 
 // fromModel builds a kind-specific prompt, calls the model, and returns a clean
-// one-line result. It returns "" (caller falls back to CPU) on any error.
+// one-line result. It returns "" (caller falls back to CPU) on any error, which
+// is logged. To avoid flooding the log when a server is down, the failure is
+// warned once and then dropped to debug until a call succeeds again.
 func (g *Generator) fromModel(ctx context.Context, kind, topic string) string {
 	prompt, maxTok := promptFor(kind, topic)
 	out, err := g.llm.complete(ctx, prompt, maxTok)
 	if err != nil {
+		if g.modelWarned {
+			g.log.Debug("model generation failed; using CPU generator", "kind", kind, "provider", g.cfg.LLM.Provider, "err", err)
+		} else {
+			g.log.Warn("model generation failed; falling back to CPU generator (further failures logged at debug)",
+				"kind", kind, "provider", g.cfg.LLM.Provider, "base_url", g.cfg.LLM.BaseURL, "err", err)
+			g.modelWarned = true
+		}
 		return ""
 	}
-	return sanitizeOneLine(out)
+	res := sanitizeOneLine(out)
+	if res == "" {
+		g.log.Warn("model returned an empty result; using CPU generator", "kind", kind)
+		return ""
+	}
+	if g.modelWarned {
+		g.log.Info("model generation recovered", "provider", g.cfg.LLM.Provider)
+		g.modelWarned = false
+	}
+	return res
 }
 
 func promptFor(kind, topic string) (prompt string, maxTokens int) {

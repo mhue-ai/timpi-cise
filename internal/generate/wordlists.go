@@ -57,8 +57,8 @@ var questionTemplates = []string{
 
 // Phrase scaffolds; first %s adjective, second %s topic, third %s connector.
 var phraseTemplates = []string{
-	"%s %s %s",       // adjective topic connector
-	"%s %s",          // adjective topic
-	"%s %s guide",    // adjective topic guide
+	"%s %s %s",            // adjective topic connector
+	"%s %s",               // adjective topic
+	"%s %s guide",         // adjective topic guide
 	"how to choose %s %s", // adjective topic (connector unused here)
 }

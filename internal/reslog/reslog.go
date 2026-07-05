@@ -5,6 +5,7 @@ package reslog
 
 import (
 	"encoding/csv"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,16 +14,20 @@ import (
 	"github.com/mhue-ai/timpi-cise/internal/metrics"
 )
 
+// ErrClosed is returned by Write after the writer has been closed.
+var ErrClosed = errors.New("reslog: writer is closed")
+
 var header = []string{
 	"time", "mode", "kind", "query", "status", "count", "latency_ms", "ok", "error", "top_title",
 }
 
 // Writer appends result rows to a CSV file.
 type Writer struct {
-	mu   sync.Mutex
-	f    *os.File
-	w    *csv.Writer
-	path string
+	mu     sync.Mutex
+	f      *os.File
+	w      *csv.Writer
+	path   string
+	closed bool
 }
 
 // Open creates (or appends to) the CSV file at path, writing a header row if the
@@ -42,8 +47,15 @@ func Open(path string) (*Writer, error) {
 	}
 	w := csv.NewWriter(f)
 	if info.Size() == 0 {
-		_ = w.Write(header)
+		if err := w.Write(header); err != nil {
+			f.Close()
+			return nil, err
+		}
 		w.Flush()
+		if err := w.Error(); err != nil {
+			f.Close()
+			return nil, err
+		}
 	}
 	return &Writer{f: f, w: w, path: path}, nil
 }
@@ -55,6 +67,9 @@ func (w *Writer) Path() string { return w.path }
 func (w *Writer) Write(r metrics.ResultSummary) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.closed {
+		return ErrClosed
+	}
 	top := ""
 	if len(r.TopTitles) > 0 {
 		top = r.TopTitles[0]
@@ -78,10 +93,14 @@ func (w *Writer) Write(r metrics.ResultSummary) error {
 	return w.w.Error()
 }
 
-// Close flushes and closes the file.
+// Close flushes and closes the file. It is idempotent.
 func (w *Writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.closed {
+		return nil
+	}
+	w.closed = true
 	if w.w != nil {
 		w.w.Flush()
 	}

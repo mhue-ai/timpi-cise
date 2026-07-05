@@ -78,7 +78,10 @@ func (s *Server) Shutdown(ctx context.Context) error { return s.srv.Shutdown(ctx
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		// The default logger is configured at startup via slog.SetDefault.
+		slog.Debug("failed to encode JSON response", "err", err)
+	}
 }
 
 type statusResp struct {
@@ -113,6 +116,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.run.Start(); err != nil {
+		s.log.Warn("start rejected", "err", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -153,6 +157,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var incoming config.Config
 		if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
+			s.log.Warn("config update: invalid JSON", "err", err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 			return
 		}
@@ -170,6 +175,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			incoming.Generation.CSVPath = cur.Generation.CSVPath
 		}
 		if err := s.run.UpdateConfig(incoming); err != nil {
+			s.log.Warn("config update rejected", "err", err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
@@ -189,10 +195,12 @@ func (s *Server) handleTerms(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := readUpload(r)
 	if err != nil {
+		s.log.Warn("terms upload: read failed", "err", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if len(data) == 0 {
+		s.log.Warn("terms upload: empty body")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "empty upload"})
 		return
 	}
@@ -200,10 +208,12 @@ func (s *Server) handleTerms(w http.ResponseWriter, r *http.Request) {
 	cfg := s.run.Config()
 	dest := filepath.Join(cfg.Logging.Dir, "terms.csv")
 	if err := os.MkdirAll(cfg.Logging.Dir, 0o755); err != nil {
+		s.log.Error("terms upload: mkdir failed", "dir", cfg.Logging.Dir, "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		s.log.Error("terms upload: write failed", "path", dest, "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -212,6 +222,7 @@ func (s *Server) handleTerms(w http.ResponseWriter, r *http.Request) {
 	cfg.Generation.CSVPath = dest
 	if err := s.run.UpdateConfig(cfg); err != nil {
 		// Saved the file, but it didn't parse into usable queries.
+		s.log.Warn("terms upload: file saved but not usable", "path", dest, "err", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -241,11 +252,14 @@ func (s *Server) handleResultsCSV(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := os.Open(path)
 	if err != nil {
+		s.log.Warn("results CSV download: not available", "path", path, "err", err)
 		http.Error(w, "no results log yet", http.StatusNotFound)
 		return
 	}
 	defer f.Close()
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", `attachment; filename="timpi-cise-results.csv"`)
-	_, _ = io.Copy(w, f)
+	if _, err := io.Copy(w, f); err != nil {
+		s.log.Warn("results CSV download: copy failed", "err", err)
+	}
 }
