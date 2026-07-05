@@ -211,6 +211,38 @@ function toggleBoxes() {
 ["mode", "source"].forEach((id) => $(id).addEventListener("change", toggleBoxes));
 $("llmEnabled").addEventListener("change", toggleBoxes);
 
+// Poll the model server for its installed models and offer them in the datalist.
+$("fetchModels").addEventListener("click", async () => {
+  const st = $("modelStatus");
+  st.className = "hint";
+  st.textContent = "polling " + ($("llmBaseURL").value.trim() || "server") + "…";
+  const payload = {
+    provider: $("llmProvider").value,
+    base_url: $("llmBaseURL").value.trim(),
+    api_key: $("llmKey").value, // blank → server uses the saved key
+  };
+  try {
+    const d = await (await fetch("/api/llm/models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })).json();
+    if (d.error) {
+      st.className = "hint";
+      st.innerHTML = `<span class="st-bad">✗ ${esc(d.error)}</span>`;
+      return;
+    }
+    const models = d.models || [];
+    $("llmModels").innerHTML = models.map((m) => `<option value="${esc(m)}"></option>`).join("");
+    st.innerHTML = models.length
+      ? `<span class="st-ok">✓ ${models.length} model${models.length > 1 ? "s" : ""} found — pick one from the box above</span>`
+      : `<span class="st-bad">no models installed on the server</span>`;
+    if (models.length && !$("llmModel").value.trim()) $("llmModel").value = models[0];
+  } catch (e) {
+    st.innerHTML = `<span class="st-bad">✗ request failed</span>`;
+  }
+});
+
 // Suggest a sensible default base URL when the provider changes.
 $("llmProvider").addEventListener("change", () => {
   const cur = $("llmBaseURL").value.trim();

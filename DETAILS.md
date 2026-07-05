@@ -76,6 +76,10 @@ API). Choose per type — short terms / long phrases / questions — whether it 
 from the model or the built-in CPU generator. If the server is unreachable, every
 type falls back to CPU. No model is bundled.
 
+Click **"Fetch installed models"** to poll the server (Ollama's `/api/tags` or the
+OpenAI-compatible `/models`) and pick from what's actually installed, rather than
+typing the model name. Errors (e.g. the server isn't running) are shown inline.
+
 ## Assertions & golden queries (monitor mode)
 
 - **Global assertions**: fail a query if it errors, returns fewer than *N*

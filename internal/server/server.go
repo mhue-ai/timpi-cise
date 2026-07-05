@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/mhue-ai/timpi-cise/internal/config"
+	"github.com/mhue-ai/timpi-cise/internal/generate"
 	"github.com/mhue-ai/timpi-cise/internal/metrics"
 	"github.com/mhue-ai/timpi-cise/internal/runner"
 )
@@ -57,6 +58,7 @@ func New(run *runner.Runner, met *metrics.Metrics, log *slog.Logger, version str
 	mux.HandleFunc("/api/stop", s.handleStop)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/terms", s.handleTerms)
+	mux.HandleFunc("/api/llm/models", s.handleLLMModels)
 	mux.HandleFunc("/api/results.csv", s.handleResultsCSV)
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/metrics", s.handleMetrics)
@@ -343,6 +345,47 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	if _, err := w.Write([]byte(b.String())); err != nil {
 		s.log.Debug("metrics write failed", "err", err)
 	}
+}
+
+// handleLLMModels polls the configured (or submitted) model server for its
+// available models so the UI can offer them for selection. It always returns
+// HTTP 200 with a "models" list and an "error" string, since an unreachable
+// server is an expected, user-visible condition rather than a server fault.
+func (s *Server) handleLLMModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
+		return
+	}
+	var body struct {
+		Provider string `json:"provider"`
+		BaseURL  string `json:"base_url"`
+		APIKey   string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	// Fall back to saved values when the UI submits blanks (e.g. a redacted key).
+	cur := s.run.Config().Generation.LLM
+	if body.Provider == "" {
+		body.Provider = cur.Provider
+	}
+	if body.BaseURL == "" {
+		body.BaseURL = cur.BaseURL
+	}
+	if body.APIKey == "" {
+		body.APIKey = cur.APIKey
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	models, err := generate.ListModels(ctx, body.Provider, body.BaseURL, body.APIKey)
+	if err != nil {
+		s.log.Debug("llm model poll failed", "provider", body.Provider, "base_url", body.BaseURL, "err", err)
+		writeJSON(w, http.StatusOK, map[string]any{"models": []string{}, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": models, "error": ""})
 }
 
 // handleResultsCSV streams the current CSV results log for download.

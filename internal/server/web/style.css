@@ -91,6 +91,8 @@ body {
 .btn-save { background: #16243d; border-color: #274b82; color: #9dc0ff; }
 a.btn { display: inline-block; text-decoration: none; }
 input[type="file"] { padding: 6px; font-size: 13px; }
+.modelrow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.modelrow .btn { padding: 7px 14px; font-size: 13px; }
 .kinds { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .kinds .hint { width: 100%; margin: 0; }
 .kinds .check { color: var(--text); }
