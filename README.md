@@ -116,10 +116,14 @@ You choose where queries come from:
 
 ### Built-in generator
 
+- **realistic** — draws from a curated corpus of real-world queries spanning
+  navigational / informational / transactional / local intents, sampled
+  **head-weighted (Zipfian-like)** so common queries recur and the long tail
+  stays diverse — traffic shaped like genuine search demand. *(Recommended.)*
 - **terms** — short generic searches (e.g. `renewable energy`, `chess strategy tips`).
 - **phrases** — multi-word phrases from templates (e.g. `affordable electric vehicles for beginners`).
 - **questions** — natural-language questions (e.g. `how does quantum computing actually work`).
-- **mixed** — rotates through all three.
+- **mixed** — rotates through terms, phrases, and questions.
 
 ### Your own CSV term list
 
@@ -189,11 +193,31 @@ chip), logged (`assertion failed …`), and recorded in the results CSV.
 - **Zero-result rate** — the share of successful queries returning nothing, a
   key search-health signal.
 - **Trends** — per-minute sparklines of average latency and success rate.
+- **Persistence** — counters and trends are saved to `<logdir>/metrics.json`
+  every 30s and on shutdown, and restored on startup, so history survives
+  restarts (toggle in the dashboard).
 - **`/healthz`** — JSON liveness (`status`, `version`, `uptime`, `running`).
 - **`/metrics`** — Prometheus exposition format for Grafana/alerting, e.g.
   `timpicise_queries_total`, `timpicise_zero_results_total`,
   `timpicise_assert_failures_total`, `timpicise_latency_ms_p95`.
 - **`--version`** — prints the embedded build version.
+
+## Alerts
+
+Set health thresholds (dashboard → *alerts*) evaluated over the last *N* queries:
+**error rate**, **zero-result rate**, **assertion-failure rate**, and **p95
+latency**. On a breach the tool logs an error, shows a banner on the dashboard,
+and (if a **webhook URL** is set) POSTs a message — compatible with **Slack**,
+**Discord**, and generic incoming webhooks. Alerts are edge-triggered with a
+cooldown (no notification floods) and send a recovery notice when metrics return
+to normal.
+
+## Accessibility
+
+The dashboard has a skip link, visible keyboard focus states, ARIA roles/labels
+(`role=alert`/`aria-live` for alerts and live results, scoped table headers,
+labelled charts), colorblind-safe status glyphs (✓/✗, not color alone), and
+honors `prefers-reduced-motion`.
 
 ## Logging
 
@@ -258,11 +282,12 @@ single machine, thanks to Go's cross-compilation.
 ```
 cmd/timpicise/        entry point (flags, browser open, shutdown)
 internal/config/      configuration + safety invariants (60s floor)
-internal/generate/    generators + CSV source + model clients (ollama, openai)
+internal/generate/    generators + realistic corpus + CSV source + LLM clients
 internal/search/      adapters: dry-run, browser (chromedp), public-web, official-api
-internal/runner/      the rate-limited polling loop + backoff
-internal/metrics/     counters, latency percentiles, per-minute time series
-internal/reslog/      CSV results-log writer (with rotation)
+internal/runner/      the rate-limited polling loop + backoff + assertions
+internal/metrics/     counters, percentiles, time series, persistence, windows
+internal/alert/       threshold evaluation + webhook notifications
+internal/reslog/      CSV results-log writer (with safe rotation)
 internal/rotate/      size-based rotating file writer (app log)
 internal/server/      local dashboard + JSON API + /healthz + /metrics + guard
 ```

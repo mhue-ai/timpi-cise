@@ -7,22 +7,23 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <a href="#main" class="skip-link">Skip to content</a>
   <header class="topbar">
     <div class="brand">
-      <span class="logo">◎</span>
+      <span class="logo" aria-hidden="true">◎</span>
       <div>
         <h1>timpi-cise</h1>
         <p class="tag">Timpi search interface exerciser</p>
       </div>
     </div>
     <div class="runstate">
-      <span id="pill" class="pill pill-stopped">stopped</span>
-      <button id="startBtn" class="btn btn-go">Start</button>
-      <button id="stopBtn" class="btn btn-stop" disabled>Stop</button>
+      <span id="pill" class="pill pill-stopped" role="status" aria-live="polite">stopped</span>
+      <button id="startBtn" class="btn btn-go" aria-label="Start polling">Start</button>
+      <button id="stopBtn" class="btn btn-stop" disabled aria-label="Stop polling">Stop</button>
     </div>
   </header>
 
-  <main>
+  <main id="main">
     <div id="alertBanner" class="alertbanner hidden" role="alert" aria-live="assertive"></div>
 
     <section class="cards">
@@ -41,21 +42,21 @@
       <div class="sparks">
         <div class="spark">
           <div class="spark-h"><span>Avg latency (ms)</span><span id="sparkLatMax" class="spark-max"></span></div>
-          <svg id="sparkLat" viewBox="0 0 300 48" preserveAspectRatio="none"></svg>
+          <svg id="sparkLat" viewBox="0 0 300 48" preserveAspectRatio="none" role="img" aria-label="Average latency over the last hour"></svg>
         </div>
         <div class="spark">
           <div class="spark-h"><span>Success rate</span><span id="sparkOkMax" class="spark-max"></span></div>
-          <svg id="sparkOk" viewBox="0 0 300 48" preserveAspectRatio="none"></svg>
+          <svg id="sparkOk" viewBox="0 0 300 48" preserveAspectRatio="none" role="img" aria-label="Success rate over the last hour"></svg>
         </div>
       </div>
     </section>
 
-    <section class="panel live" id="livePanel">
+    <section class="panel live" id="livePanel" aria-labelledby="liveHeading">
       <div class="livehead">
-        <h2>Live results</h2>
-        <span id="liveBeat" class="beat">idle</span>
+        <h2 id="liveHeading">Live results</h2>
+        <span id="liveBeat" class="beat" role="status" aria-live="polite">idle</span>
       </div>
-      <div id="liveBody" class="livebody">
+      <div id="liveBody" class="livebody" aria-live="polite">
         <p class="livehint">Press <strong>Start</strong> — the latest query and its results appear here so you can see it working.</p>
       </div>
     </section>
@@ -64,9 +65,12 @@
       <section class="panel">
         <h2>Recent queries</h2>
         <div class="tablewrap">
-          <table id="results">
+          <table id="results" aria-label="Recent queries">
             <thead>
-              <tr><th>Time</th><th>Kind</th><th>Query</th><th>Status</th><th>Results</th><th>ms</th></tr>
+              <tr>
+                <th scope="col">Time</th><th scope="col">Kind</th><th scope="col">Query</th>
+                <th scope="col">Status</th><th scope="col">Results</th><th scope="col">ms</th>
+              </tr>
             </thead>
             <tbody id="resultsBody">
               <tr class="empty"><td colspan="6">No queries yet. Configure a mode and press Start.</td></tr>
