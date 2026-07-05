@@ -93,9 +93,15 @@ func (c *ollamaClient) listModels(ctx context.Context) ([]string, error) {
 		Models []struct {
 			Name string `json:"name"`
 		} `json:"models"`
+		Error string `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
+	}
+	// Some servers (e.g. LM Studio) answer a wrong path with 200 + an error
+	// body. Surface it instead of silently reporting zero models.
+	if out.Error != "" {
+		return nil, fmt.Errorf("%s (is the provider set to Ollama for this server?)", out.Error)
 	}
 	names := make([]string, 0, len(out.Models))
 	for _, m := range out.Models {
