@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>timpi-cise — Timpi interface exerciser</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◎</span>
+      <div>
+        <h1>timpi-cise</h1>
+        <p class="tag">Timpi search interface exerciser</p>
+      </div>
+    </div>
+    <div class="runstate">
+      <span id="pill" class="pill pill-stopped">stopped</span>
+      <button id="startBtn" class="btn btn-go">Start</button>
+      <button id="stopBtn" class="btn btn-stop" disabled>Stop</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="cards">
+      <div class="card"><div class="k">Queries sent</div><div id="mSent" class="v">0</div></div>
+      <div class="card"><div class="k">Successful</div><div id="mOK" class="v ok">0</div></div>
+      <div class="card"><div class="k">Failed</div><div id="mFail" class="v bad">0</div></div>
+      <div class="card"><div class="k">Avg latency</div><div id="mLat" class="v">—</div></div>
+      <div class="card"><div class="k">Uptime</div><div id="mUp" class="v">—</div></div>
+      <div class="card"><div class="k">Mode / adapter</div><div id="mMode" class="v small">—</div></div>
+    </section>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>Recent queries</h2>
+        <div class="tablewrap">
+          <table id="results">
+            <thead>
+              <tr><th>Time</th><th>Kind</th><th>Query</th><th>Status</th><th>Results</th><th>ms</th></tr>
+            </thead>
+            <tbody id="resultsBody">
+              <tr class="empty"><td colspan="6">No queries yet. Configure a mode and press Start.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Configuration</h2>
+        <form id="cfgForm" class="cfg">
+          <label>Connection mode
+            <select id="mode" name="mode">
+              <option value="dry-run">dry-run (no network — safe default)</option>
+              <option value="public-web">public-web (exercise timpi.com)</option>
+              <option value="official-api">official-api (your Timpi key)</option>
+            </select>
+          </label>
+
+          <label>Polling interval (seconds — minimum 60)
+            <input id="poll" name="poll_seconds" type="number" min="60" step="5" value="60" />
+          </label>
+
+          <label>Random jitter (extra seconds, 0–120)
+            <input id="jitter" name="jitter_seconds" type="number" min="0" max="120" step="5" value="15" />
+          </label>
+
+          <label>Query generation
+            <select id="genMode" name="gen_mode">
+              <option value="mixed">mixed (terms + phrases + questions)</option>
+              <option value="terms">terms only</option>
+              <option value="phrases">phrases only</option>
+              <option value="questions">questions only</option>
+            </select>
+          </label>
+
+          <label class="check">
+            <input id="useOllama" type="checkbox" />
+            Use local GPU (Ollama) for advanced questions
+          </label>
+
+          <fieldset id="ollamaBox" class="sub hidden">
+            <label>Ollama URL
+              <input id="ollamaURL" type="text" placeholder="http://localhost:11434" />
+            </label>
+            <label>Model
+              <input id="ollamaModel" type="text" placeholder="llama3.2" />
+            </label>
+          </fieldset>
+
+          <fieldset id="webBox" class="sub hidden">
+            <legend>public-web endpoint</legend>
+            <p class="hint">Capture this once from timpi.com → DevTools → Network → run a search →
+              copy the request that returns results. Use <code>{query}</code> as a placeholder or set a query param.</p>
+            <label>Endpoint URL
+              <input id="webEndpoint" type="text" placeholder="https://…/search?q={query}" />
+            </label>
+            <label>Method
+              <select id="webMethod"><option>GET</option><option>POST</option></select>
+            </label>
+            <label>Query param (if no {query})
+              <input id="webParam" type="text" placeholder="q" />
+            </label>
+            <label>Results JSON path (optional)
+              <input id="webItems" type="text" placeholder="data.results" />
+            </label>
+          </fieldset>
+
+          <fieldset id="apiBox" class="sub hidden">
+            <legend>official Data API</legend>
+            <label>Endpoint URL
+              <input id="apiEndpoint" type="text" placeholder="https://api.timpi…/search?q={query}" />
+            </label>
+            <label>Method
+              <select id="apiMethod"><option>GET</option><option>POST</option></select>
+            </label>
+            <label>Query param (if no {query})
+              <input id="apiParam" type="text" placeholder="q" />
+            </label>
+            <label>API key <span id="keyState" class="hint"></span>
+              <input id="apiKey" type="password" placeholder="leave blank to keep current" />
+            </label>
+            <label>Results JSON path (optional)
+              <input id="apiItems" type="text" placeholder="data.results" />
+            </label>
+          </fieldset>
+
+          <div class="cfgactions">
+            <button type="submit" class="btn btn-save">Save configuration</button>
+            <span id="cfgMsg" class="msg"></span>
+          </div>
+        </form>
+        <p class="foot">Safety: minimum one query per minute is enforced by the program and cannot be lowered.</p>
+      </section>
+    </div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -13,6 +13,15 @@ out/
 target/
 *.egg-info/
 
+# Go
+/timpicise
+/timpicise.exe
+*.test
+*.out
+
+# Local runtime config (may contain an API key)
+config.json
+
 # Environment / secrets
 .env
 .env.*
