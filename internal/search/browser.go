@@ -68,8 +68,30 @@ func (a *browserAdapter) ensure() error {
 	}
 	a.alloc, a.cancelA = chromedp.NewExecAllocator(context.Background(), opts...)
 	a.brCtx, a.cancelB = chromedp.NewContext(a.alloc)
-	// The browser launches lazily on the first navigate; its tab is owned by
-	// a.brCtx (cancelB), so it persists and is reused across queries.
+
+	// Start the browser now, on brCtx *directly*, so the tab is owned by brCtx
+	// (cancelB) and survives the per-query timeout contexts. If the browser were
+	// instead created lazily by the first query's navigate, the tab would be
+	// tied to that query's context — and cancelling it when the query finished
+	// would close the tab, breaking the next query with "context canceled".
+	// A goroutine + timeout guards startup without tying the tab to a
+	// cancellable child of brCtx.
+	errc := make(chan error, 1)
+	go func() { errc <- chromedp.Run(a.brCtx) }()
+	select {
+	case err := <-errc:
+		if err != nil {
+			a.cancelB()
+			a.cancelA()
+			a.started = false
+			return fmt.Errorf("could not start browser (is Chrome/Edge/Chromium installed?): %w", err)
+		}
+	case <-time.After(45 * time.Second):
+		a.cancelB()
+		a.cancelA()
+		a.started = false
+		return fmt.Errorf("browser did not start within 45s")
+	}
 	a.started = true
 	return nil
 }
@@ -108,17 +130,26 @@ func (a *browserAdapter) Search(ctx context.Context, query string) (Result, erro
 		return Result{Query: query, LatencyMS: time.Since(start).Milliseconds()}, fmt.Errorf("browser: navigate failed: %w", err)
 	}
 
-	// Poll for rendered results until the timeout.
+	// Poll until results have rendered AND the count has stopped growing, so we
+	// scrape the full result set rather than catching the page mid-render (which
+	// can otherwise return just the first item). The count must be stable across
+	// two consecutive reads (~1s) before we proceed.
 	itemSel := a.cfg.ItemSelector
-	var count int
+	var count, stableFor int
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if err := chromedp.Run(tctx, chromedp.Evaluate(countJS(itemSel), &count)); err != nil {
+		var c int
+		if err := chromedp.Run(tctx, chromedp.Evaluate(countJS(itemSel), &c)); err != nil {
 			return Result{Query: query, LatencyMS: time.Since(start).Milliseconds()}, fmt.Errorf("browser: %w", err)
 		}
-		if count > 0 {
-			break
+		if c > 0 && c == count {
+			if stableFor++; stableFor >= 2 {
+				break
+			}
+		} else {
+			stableFor = 0
 		}
+		count = c
 		select {
 		case <-tctx.Done():
 			return Result{Query: query, LatencyMS: time.Since(start).Milliseconds()}, tctx.Err()
