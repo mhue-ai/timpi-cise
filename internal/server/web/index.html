@@ -27,9 +27,25 @@
       <div class="card"><div class="k">Queries sent</div><div id="mSent" class="v">0</div></div>
       <div class="card"><div class="k">Successful</div><div id="mOK" class="v ok">0</div></div>
       <div class="card"><div class="k">Failed</div><div id="mFail" class="v bad">0</div></div>
-      <div class="card"><div class="k">Avg latency</div><div id="mLat" class="v">—</div></div>
+      <div class="card"><div class="k">Zero-result rate</div><div id="mZero" class="v">—</div></div>
+      <div class="card"><div class="k">Latency p50 / p95 / p99</div><div id="mPct" class="v small">—</div></div>
+      <div class="card"><div class="k">Assertions</div><div id="mAssert" class="v small">off</div></div>
       <div class="card"><div class="k">Uptime</div><div id="mUp" class="v">—</div></div>
       <div class="card"><div class="k">Mode / adapter</div><div id="mMode" class="v small">—</div></div>
+    </section>
+
+    <section class="panel trends">
+      <h2>Trends (last hour, per minute)</h2>
+      <div class="sparks">
+        <div class="spark">
+          <div class="spark-h"><span>Avg latency (ms)</span><span id="sparkLatMax" class="spark-max"></span></div>
+          <svg id="sparkLat" viewBox="0 0 300 48" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="spark">
+          <div class="spark-h"><span>Success rate</span><span id="sparkOkMax" class="spark-max"></span></div>
+          <svg id="sparkOk" viewBox="0 0 300 48" preserveAspectRatio="none"></svg>
+        </div>
+      </div>
     </section>
 
     <section class="panel live" id="livePanel">
@@ -176,6 +192,19 @@
             <label>Results JSON path (optional)
               <input id="apiItems" type="text" placeholder="data.results" />
             </label>
+          </fieldset>
+
+          <fieldset class="sub">
+            <legend>assertions (turn it into a monitor)</legend>
+            <label class="check"><input id="assertEnabled" type="checkbox" /> Check every query against expectations</label>
+            <label>Max latency (ms, 0 = no limit)
+              <input id="assertLatency" type="number" min="0" step="50" value="0" />
+            </label>
+            <label>Minimum results (0 = no limit)
+              <input id="assertMinResults" type="number" min="0" step="1" value="0" />
+            </label>
+            <p class="hint">Golden queries: add a 3rd column to your CSV with a substring a result must contain
+              (e.g. <code>timpi,terms,timpi.io</code>). Those are checked even with assertions off.</p>
           </fieldset>
 
           <fieldset class="sub">

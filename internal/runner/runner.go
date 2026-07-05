@@ -6,9 +6,11 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -289,6 +291,15 @@ func (r *Runner) step(stop <-chan struct{}) time.Duration {
 			summary.TopTitles = append(summary.TopTitles, it.Title)
 		}
 	}
+
+	// Assertions: evaluate when globally enabled or when this query carries a
+	// per-query "must contain" (golden) expectation.
+	if cfg.Assertions.Enabled || q.MustContain != "" {
+		pass, msg := evaluateAssertions(cfg.Assertions, q, result, err)
+		summary.AssertPass = &pass
+		summary.AssertMsg = msg
+	}
+
 	r.met.Record(summary)
 	if res != nil {
 		if werr := res.Write(summary); werr != nil {
@@ -300,8 +311,47 @@ func (r *Runner) step(stop <-chan struct{}) time.Duration {
 	} else {
 		r.log.Debug("query ok", "query", q.Text, "kind", q.Kind, "count", result.Count, "latency_ms", result.LatencyMS)
 	}
+	if summary.AssertPass != nil && !*summary.AssertPass {
+		r.log.Warn("assertion failed", "query", q.Text, "detail", summary.AssertMsg)
+	}
 
 	return r.nextWait(cfg, err == nil, result.RetryAfter)
+}
+
+// evaluateAssertions checks a result against the global assertions plus any
+// per-query "must contain" expectation, returning pass/fail and a reason string.
+func evaluateAssertions(a config.Assertions, q generate.Query, res search.Result, err error) (bool, string) {
+	var fails []string
+	if err != nil {
+		fails = append(fails, "request failed: "+err.Error())
+	}
+	if a.MinResults > 0 && res.Count < a.MinResults {
+		fails = append(fails, fmt.Sprintf("got %d results, want >= %d", res.Count, a.MinResults))
+	}
+	if a.MaxLatencyMS > 0 && res.LatencyMS > int64(a.MaxLatencyMS) {
+		fails = append(fails, fmt.Sprintf("latency %dms > %dms", res.LatencyMS, a.MaxLatencyMS))
+	}
+	if q.MustContain != "" && !resultsContain(res.Items, q.MustContain) {
+		fails = append(fails, fmt.Sprintf("no result contains %q", q.MustContain))
+	}
+	if len(fails) == 0 {
+		return true, ""
+	}
+	return false, strings.Join(fails, "; ")
+}
+
+// resultsContain reports whether any result item contains needle (case-
+// insensitive) in its title, URL, or snippet.
+func resultsContain(items []search.Item, needle string) bool {
+	n := strings.ToLower(needle)
+	for _, it := range items {
+		if strings.Contains(strings.ToLower(it.Title), n) ||
+			strings.Contains(strings.ToLower(it.URL), n) ||
+			strings.Contains(strings.ToLower(it.Snippet), n) {
+			return true
+		}
+	}
+	return false
 }
 
 // nextWait computes the delay before the next query, honoring the safety floor,

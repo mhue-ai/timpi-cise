@@ -44,6 +44,9 @@ environment required.
 | `--addr <host:port>` | `127.0.0.1:8770` | Dashboard listen address (loopback). |
 | `--no-open` | off | Don't auto-open a browser. |
 | `--start` | off | Begin polling immediately on launch. |
+| `--verbose` | off | Log at debug level. |
+| `--expose` | off | Allow non-loopback (LAN) access (disables the DNS-rebinding guard). |
+| `--version` | — | Print version and exit. |
 
 ---
 
@@ -145,6 +148,41 @@ Two providers are supported:
   or a hosted API. Default base URL `http://localhost:1234/v1`. An API key field
   is available for servers that require one.
 
+## Assertions & golden queries (monitor mode)
+
+Beyond generating traffic, timpi-cise can **check** each query and report
+pass/fail — turning it into a lightweight search monitor.
+
+- **Global assertions** (dashboard → *assertions*): fail a query if it errors,
+  returns fewer than *N* results, or exceeds a *max latency*.
+- **Golden queries**: add a **third column** to your CSV with a substring that a
+  result must contain. Example `queries.csv`:
+
+  ```csv
+  timpi,terms,timpi.io
+  privacy tools,phrases,
+  how does search indexing work?,questions,
+  ```
+
+  The first row asserts that searching `timpi` returns a result containing
+  `timpi.io` — a classic index-regression canary. Golden checks run even with
+  global assertions off.
+
+Failures are counted (dashboard **Assertions** card), flagged per row (**FAIL**
+chip), logged (`assertion failed …`), and recorded in the results CSV.
+
+## Metrics & monitoring
+
+- **Latency percentiles** — p50 / p95 / p99 (averages hide tail latency).
+- **Zero-result rate** — the share of successful queries returning nothing, a
+  key search-health signal.
+- **Trends** — per-minute sparklines of average latency and success rate.
+- **`/healthz`** — JSON liveness (`status`, `version`, `uptime`, `running`).
+- **`/metrics`** — Prometheus exposition format for Grafana/alerting, e.g.
+  `timpicise_queries_total`, `timpicise_zero_results_total`,
+  `timpicise_assert_failures_total`, `timpicise_latency_ms_p95`.
+- **`--version`** — prints the embedded build version.
+
 ## Logging
 
 - **CSV results log** — every executed query is appended to `results.csv`
@@ -169,6 +207,12 @@ Two providers are supported:
   server asks it to.
 - **Dry-run by default** — it does nothing over the network until you opt in.
 - **Loopback dashboard** — the UI binds to `127.0.0.1` by default.
+- **DNS-rebinding / CSRF guard** — the dashboard rejects requests with a
+  non-local `Host` header and cross-origin state-changing requests. Binding to a
+  non-loopback address requires an explicit `--expose` flag (with a warning).
+- **Endpoint URL validation** — only `http(s)` endpoints are accepted.
+- **Log & CSV rotation** — the app log and results CSV rotate at 10 MiB so they
+  can't grow without bound.
 
 ---
 
@@ -201,9 +245,10 @@ internal/config/      configuration + safety invariants (60s floor)
 internal/generate/    generators + CSV source + model clients (ollama, openai)
 internal/search/      adapters: dry-run, public-web, official-api
 internal/runner/      the rate-limited polling loop + backoff
-internal/metrics/     thread-safe counters + recent-results buffer
-internal/reslog/      CSV results-log writer
-internal/server/      local dashboard (embedded HTML/CSS/JS + JSON API)
+internal/metrics/     counters, latency percentiles, per-minute time series
+internal/reslog/      CSV results-log writer (with rotation)
+internal/rotate/      size-based rotating file writer (app log)
+internal/server/      local dashboard + JSON API + /healthz + /metrics + guard
 ```
 
 ## License

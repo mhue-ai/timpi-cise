@@ -8,12 +8,16 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mhue-ai/timpi-cise/internal/config"
@@ -29,18 +33,21 @@ const maxUploadBytes = 8 << 20 // 8 MiB
 
 // Server wires the HTTP handlers to the runner and metrics.
 type Server struct {
-	run *runner.Runner
-	met *metrics.Metrics
-	log *slog.Logger
-	srv *http.Server
+	run      *runner.Runner
+	met      *metrics.Metrics
+	log      *slog.Logger
+	version  string
+	allowLAN bool // when false, requests with a non-local Host header are rejected
+	srv      *http.Server
 }
 
-// New builds a Server listening on the runner's configured address.
-func New(run *runner.Runner, met *metrics.Metrics, log *slog.Logger) *Server {
+// New builds a Server listening on the runner's configured address. allowLAN
+// relaxes the anti-DNS-rebinding Host check for intentional non-loopback binds.
+func New(run *runner.Runner, met *metrics.Metrics, log *slog.Logger, version string, allowLAN bool) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &Server{run: run, met: met, log: log}
+	s := &Server{run: run, met: met, log: log, version: version, allowLAN: allowLAN}
 	mux := http.NewServeMux()
 
 	sub, _ := fs.Sub(webFS, "web")
@@ -51,13 +58,65 @@ func New(run *runner.Runner, met *metrics.Metrics, log *slog.Logger) *Server {
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/terms", s.handleTerms)
 	mux.HandleFunc("/api/results.csv", s.handleResultsCSV)
+	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/metrics", s.handleMetrics)
 
 	s.srv = &http.Server{
 		Addr:              run.Config().Server.Addr,
-		Handler:           mux,
+		Handler:           s.guard(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return s
+}
+
+// guard defends the local dashboard against DNS-rebinding and cross-site
+// request forgery: it rejects requests whose Host header is not local (unless
+// LAN access was explicitly enabled) and cross-origin state-changing requests.
+func (s *Server) guard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.allowLAN && !hostIsLocal(r.Host) {
+			s.log.Warn("rejected non-local Host header", "host", r.Host, "path", r.URL.Path)
+			http.Error(w, "forbidden: non-local Host header (DNS-rebinding guard)", http.StatusForbidden)
+			return
+		}
+		if r.Method == http.MethodPost {
+			if o := r.Header.Get("Origin"); o != "" && !originMatchesHost(o, r.Host) {
+				s.log.Warn("rejected cross-origin request", "origin", o, "host", r.Host, "path", r.URL.Path)
+				http.Error(w, "forbidden: cross-origin request", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hostIsLocal reports whether a Host header refers to the loopback interface.
+func hostIsLocal(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]") // strip IPv6 brackets
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// originMatchesHost reports whether a request Origin is same-origin with the
+// request Host (or is itself loopback).
+func originMatchesHost(origin, host string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if u.Host == host {
+		return true
+	}
+	return hostIsLocal(u.Host)
 }
 
 // Addr returns the listen address.
@@ -242,6 +301,47 @@ func readUpload(r *http.Request) ([]byte, error) {
 		return io.ReadAll(file)
 	}
 	return io.ReadAll(r.Body)
+}
+
+// handleHealthz reports basic liveness for supervisors and uptime checks.
+func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	snap := s.met.Snapshot()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":         "ok",
+		"version":        s.version,
+		"uptime_seconds": snap.UptimeSeconds,
+		"running":        snap.Running,
+	})
+}
+
+// handleMetrics exposes counters in Prometheus text exposition format so the
+// tool can be scraped into Grafana/alerting.
+func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+	snap := s.met.Snapshot()
+	running := 0
+	if snap.Running {
+		running = 1
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	var b strings.Builder
+	metric := func(name, typ, help string, value any) {
+		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s %s\n%s %v\n", name, help, name, typ, name, value)
+	}
+	metric("timpicise_up", "gauge", "1 if the process is serving.", 1)
+	metric("timpicise_running", "gauge", "1 if the polling loop is active.", running)
+	metric("timpicise_uptime_seconds", "gauge", "Process uptime in seconds.", snap.UptimeSeconds)
+	metric("timpicise_queries_total", "counter", "Total queries executed.", snap.Sent)
+	metric("timpicise_queries_ok_total", "counter", "Queries that succeeded.", snap.OK)
+	metric("timpicise_queries_failed_total", "counter", "Queries that failed.", snap.Failed)
+	metric("timpicise_zero_results_total", "counter", "Successful queries returning zero results.", snap.ZeroResults)
+	metric("timpicise_assert_failures_total", "counter", "Assertion failures.", snap.AssertFail)
+	metric("timpicise_latency_ms_avg", "gauge", "Average query latency (ms).", snap.AvgLatencyMS)
+	metric("timpicise_latency_ms_p50", "gauge", "p50 query latency (ms).", snap.P50MS)
+	metric("timpicise_latency_ms_p95", "gauge", "p95 query latency (ms).", snap.P95MS)
+	metric("timpicise_latency_ms_p99", "gauge", "p99 query latency (ms).", snap.P99MS)
+	if _, err := w.Write([]byte(b.String())); err != nil {
+		s.log.Debug("metrics write failed", "err", err)
+	}
 }
 
 // handleResultsCSV streams the current CSV results log for download.

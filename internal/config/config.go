@@ -7,6 +7,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,6 +82,24 @@ type Config struct {
 
 	// Logging controls the app log and the CSV results log.
 	Logging Logging `json:"logging"`
+
+	// Assertions turn the tool from a traffic generator into a monitor: each
+	// query is checked against expectations and reported pass/fail.
+	Assertions Assertions `json:"assertions"`
+}
+
+// Assertions define health expectations evaluated on every executed query.
+// Per-query "must contain" checks (golden queries) come from a third CSV column
+// and apply even when Enabled is false.
+type Assertions struct {
+	// Enabled turns on the global checks below.
+	Enabled bool `json:"enabled"`
+
+	// MaxLatencyMS fails a query slower than this (0 = no limit).
+	MaxLatencyMS int `json:"max_latency_ms"`
+
+	// MinResults fails a query returning fewer than this many results.
+	MinResults int `json:"min_results"`
 }
 
 // Generation controls where queries come from.
@@ -371,6 +390,12 @@ func (c *Config) Sanitize() {
 	if strings.TrimSpace(c.Logging.Dir) == "" {
 		c.Logging.Dir = DefaultLogDir()
 	}
+	if c.Assertions.MaxLatencyMS < 0 {
+		c.Assertions.MaxLatencyMS = 0
+	}
+	if c.Assertions.MinResults < 0 {
+		c.Assertions.MinResults = 0
+	}
 	if strings.TrimSpace(c.PublicWeb.Method) == "" {
 		c.PublicWeb.Method = "GET"
 	}
@@ -398,13 +423,36 @@ func (c Config) Validate() error {
 		if strings.TrimSpace(c.PublicWeb.Endpoint) == "" {
 			return fmt.Errorf("public-web mode needs public_web.endpoint (capture it from timpi.com DevTools Network tab)")
 		}
+		if err := validateEndpoint(c.PublicWeb.Endpoint); err != nil {
+			return err
+		}
 	case ModeOfficialAPI:
 		if strings.TrimSpace(c.API.Endpoint) == "" {
 			return fmt.Errorf("official-api mode needs api.endpoint")
 		}
+		if err := validateEndpoint(c.API.Endpoint); err != nil {
+			return err
+		}
 		if strings.TrimSpace(c.API.Key) == "" {
 			return fmt.Errorf("official-api mode needs api.key")
 		}
+	}
+	return nil
+}
+
+// validateEndpoint ensures an endpoint is a well-formed http(s) URL. The
+// {query} placeholder is tolerated in the path/query.
+func validateEndpoint(ep string) error {
+	probe := strings.ReplaceAll(ep, "{query}", "x")
+	u, err := url.Parse(probe)
+	if err != nil {
+		return fmt.Errorf("invalid endpoint URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("endpoint must be an http(s) URL, got %q", ep)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("endpoint has no host: %q", ep)
 	}
 	return nil
 }

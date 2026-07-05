@@ -112,6 +112,22 @@ main { padding: 22px; max-width: 1200px; margin: 0 auto; }
 }
 .panel h2 { margin: 0 0 12px; font-size: 15px; color: var(--accent); }
 
+/* Trends sparklines */
+.trends { margin-bottom: 18px; }
+.trends h2 { margin: 0 0 10px; font-size: 15px; color: var(--accent); }
+.sparks { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 700px) { .sparks { grid-template-columns: 1fr; } }
+.spark-h { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.spark-max { color: var(--text); }
+.spark svg { width: 100%; height: 48px; display: block; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; }
+
+/* Assertion chips */
+.chip { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 5px; letter-spacing: .4px; }
+.chip-pass { background: #14351f; color: var(--ok); }
+.chip-fail { background: #3a2226; color: var(--bad); }
+.v .ok { color: var(--ok); }
+.v .bad { color: var(--bad); }
+
 /* Live results panel */
 .live { margin-bottom: 18px; }
 .livehead { display: flex; align-items: center; justify-content: space-between; }
@@ -127,9 +143,12 @@ main { padding: 22px; max-width: 1200px; margin: 0 auto; }
 .liveq { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .liveq-text { font-size: 16px; font-weight: 600; }
 .liveq-meta { color: var(--muted); font-size: 12.5px; margin-left: auto; }
-.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-.dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-.dot.bad { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+.dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%; font-size: 12px; font-weight: 700;
+}
+.dot.ok { background: #14351f; color: var(--ok); }
+.dot.bad { background: #3a2226; color: var(--bad); }
 .livenote {
   margin-top: 10px; padding: 8px 12px; border-radius: 8px;
   background: #3a3320; color: var(--warn); font-size: 13px; border: 1px solid #5a4d24;

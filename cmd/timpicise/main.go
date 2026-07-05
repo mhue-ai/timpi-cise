@@ -24,9 +24,13 @@ import (
 
 	"github.com/mhue-ai/timpi-cise/internal/config"
 	"github.com/mhue-ai/timpi-cise/internal/metrics"
+	"github.com/mhue-ai/timpi-cise/internal/rotate"
 	"github.com/mhue-ai/timpi-cise/internal/runner"
 	"github.com/mhue-ai/timpi-cise/internal/server"
 )
+
+// version is set at build time via -ldflags "-X main.version=...".
+var version = "dev"
 
 func main() {
 	// run() owns all deferred cleanup (log flush, results-CSV close). main only
@@ -39,13 +43,20 @@ func main() {
 
 func run() error {
 	var (
-		cfgPath   = flag.String("config", defaultConfigPath(), "path to config file (created if missing)")
-		addr      = flag.String("addr", "", "override dashboard listen address (e.g. 127.0.0.1:8770)")
-		noOpen    = flag.Bool("no-open", false, "do not open the dashboard in a browser")
-		autostart = flag.Bool("start", false, "begin polling immediately on launch")
-		verbose   = flag.Bool("verbose", false, "log at debug level")
+		cfgPath     = flag.String("config", defaultConfigPath(), "path to config file (created if missing)")
+		addr        = flag.String("addr", "", "override dashboard listen address (e.g. 127.0.0.1:8770)")
+		noOpen      = flag.Bool("no-open", false, "do not open the dashboard in a browser")
+		autostart   = flag.Bool("start", false, "begin polling immediately on launch")
+		verbose     = flag.Bool("verbose", false, "log at debug level")
+		expose      = flag.Bool("expose", false, "allow non-loopback (LAN) access to the dashboard (disables the DNS-rebinding guard)")
+		showVersion = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("timpi-cise", version)
+		return nil
+	}
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -68,12 +79,25 @@ func run() error {
 	logger, closeLog := setupLogging(cfg, *verbose)
 	defer closeLog()
 
+	// Anti-DNS-rebinding: LAN access is only allowed when the user explicitly
+	// binds to a non-loopback address AND passes --expose.
+	bindLocal := hostIsLoopback(cfg.Server.Addr)
+	allowLAN := false
+	if !bindLocal {
+		if *expose {
+			allowLAN = true
+			logger.Warn("dashboard exposed to the network", "addr", cfg.Server.Addr)
+		} else {
+			logger.Warn("bound to a non-loopback address without --expose; the DNS-rebinding guard will reject non-local requests. Pass --expose to allow LAN access.", "addr", cfg.Server.Addr)
+		}
+	}
+
 	met := metrics.New(50)
 	run := runner.New(cfg, *cfgPath, met, logger)
 	defer run.Close()
-	srv := server.New(run, met, logger)
+	srv := server.New(run, met, logger, version, allowLAN)
 
-	logger.Info("timpi-cise starting", "mode", cfg.Mode, "addr", cfg.Server.Addr, "log_dir", cfg.Logging.Dir)
+	logger.Info("timpi-cise starting", "version", version, "mode", cfg.Mode, "addr", cfg.Server.Addr, "log_dir", cfg.Logging.Dir)
 
 	if *autostart {
 		if err := run.Start(); err != nil {
@@ -134,9 +158,7 @@ func setupLogging(cfg config.Config, verbose bool) (*slog.Logger, func()) {
 	closeFn := func() {}
 
 	if cfg.Logging.AppLog {
-		if err := os.MkdirAll(cfg.Logging.Dir, 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: cannot create log dir %q: %v (logging to terminal only)\n", cfg.Logging.Dir, err)
-		} else if f, ferr := os.OpenFile(cfg.AppLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr != nil {
+		if f, ferr := rotate.New(cfg.AppLogPath(), 10<<20); ferr != nil {
 			fmt.Fprintf(os.Stderr, "warning: cannot open log file %q: %v (logging to terminal only)\n", cfg.AppLogPath(), ferr)
 		} else {
 			writers = append(writers, f)
@@ -157,6 +179,25 @@ func defaultConfigPath() string {
 		return filepath.Join(dir, "timpi-cise", "config.json")
 	}
 	return "timpi-cise-config.json"
+}
+
+// hostIsLoopback reports whether a listen address binds only to the loopback
+// interface (or an empty host, which Go treats as all interfaces → not local).
+func hostIsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // normalizeHost turns a listen address like ":8770" or "0.0.0.0:8770" into

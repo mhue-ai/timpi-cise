@@ -32,9 +32,17 @@ async function refresh() {
     $("mSent").textContent = m.sent;
     $("mOK").textContent = m.ok;
     $("mFail").textContent = m.failed;
-    $("mLat").textContent = m.sent ? `${m.avg_latency_ms} ms` : "—";
+    $("mZero").textContent = m.ok ? `${(m.zero_result_rate * 100).toFixed(1)}%` : "—";
+    $("mPct").textContent = m.sent ? `${m.p50_ms} / ${m.p95_ms} / ${m.p99_ms} ms` : "—";
+    if (m.assert_run) {
+      const failEl = m.assert_fail > 0 ? `<span class="bad">${m.assert_fail} fail</span>` : `<span class="ok">all pass</span>`;
+      $("mAssert").innerHTML = `${m.assert_run - m.assert_fail}/${m.assert_run} · ${failEl}`;
+    } else {
+      $("mAssert").textContent = "off";
+    }
     $("mUp").textContent = fmtDuration(m.uptime_seconds);
     $("mMode").textContent = `${d.mode} · ${d.adapter}`;
+    renderSparklines(m.series || []);
 
     $("logDir").textContent = d.log_dir || "—";
     $("csvPath").textContent = d.results_csv_path || "(disabled)";
@@ -69,6 +77,28 @@ function hostOf(u) {
   try { return new URL(u).host; } catch { return ""; }
 }
 
+// renderSparklines draws two inline SVG polylines (avg latency and success rate)
+// from the per-minute time series. No external chart library.
+function renderSparklines(series) {
+  const W = 300, H = 48, pad = 3;
+  const drawn = (id, values, maxLabelEl, fmtMax, color) => {
+    const svg = $(id);
+    if (!values.length) { svg.innerHTML = ""; if (maxLabelEl) $(maxLabelEl).textContent = ""; return; }
+    const max = Math.max(1, ...values);
+    if (maxLabelEl) $(maxLabelEl).textContent = fmtMax(max);
+    const n = values.length;
+    const x = (i) => n === 1 ? W / 2 : pad + (i * (W - 2 * pad)) / (n - 1);
+    const y = (v) => H - pad - (v / max) * (H - 2 * pad);
+    const pts = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    const area = `${pad},${H - pad} ${pts} ${x(n - 1).toFixed(1)},${H - pad}`;
+    svg.innerHTML =
+      `<polygon points="${area}" fill="${color}" fill-opacity="0.12" />` +
+      `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" />`;
+  };
+  drawn("sparkLat", series.map((p) => p.avg_latency_ms), "sparkLatMax", (m) => `${m} ms`, "#4f8cff");
+  drawn("sparkOk", series.map((p) => p.sent ? Math.round((p.ok / p.sent) * 100) : 0), "sparkOkMax", () => "100%", "#3fb950");
+}
+
 // renderLive shows the most recent query and its results in miniature so it is
 // obvious the tool is working.
 function renderLive(rows, running) {
@@ -93,18 +123,21 @@ function renderLive(rows, running) {
         </div>`).join("")
     : `<p class="livehint">No result items to preview${r.status ? ` (HTTP ${r.status})` : ""}.</p>`;
 
-  const note = r.note ? `<div class="livenote">⚠ ${esc(r.note)}</div>` : "";
+  const notes = [];
+  if (r.note) notes.push(`<div class="livenote">⚠ ${esc(r.note)}</div>`);
+  if (r.assert_pass === false) notes.push(`<div class="livenote">✗ assertion failed: ${esc(r.assert_msg)}</div>`);
   const stamp = fmtTime(r.time);
-  const okdot = r.ok ? `<span class="dot ok"></span>` : `<span class="dot bad"></span>`;
+  const okdot = r.ok ? `<span class="dot ok">✓</span>` : `<span class="dot bad">✗</span>`;
+  const assert = assertBadge(r);
 
   body.innerHTML = `
     <div class="liveq">
       ${okdot}
       <span class="badge ${esc(r.kind)}">${esc(r.kind)}</span>
-      <span class="liveq-text" title="${esc(r.query)}">${esc(r.query)}</span>
+      <span class="liveq-text" title="${esc(r.query)}">${esc(r.query)}</span>${assert}
       <span class="liveq-meta">${r.count} results · ${r.latency_ms} ms · ${stamp}</span>
     </div>
-    ${note}
+    ${notes.join("")}
     <div class="minis">${cards}</div>`;
 }
 
@@ -115,18 +148,28 @@ function renderResults(rows) {
     return;
   }
   body.innerHTML = rows.map((r) => {
+    // Colorblind-safe: glyph + color, never color alone.
     const status = r.ok
-      ? `<span class="st-ok">${r.status || "ok"}</span>`
-      : `<span class="st-bad" title="${esc(r.err)}">${r.status || "err"}</span>`;
+      ? `<span class="st-ok">✓ ${r.status || "ok"}</span>`
+      : `<span class="st-bad" title="${esc(r.err)}">✗ ${r.status || "err"}</span>`;
+    const assert = assertBadge(r);
     return `<tr>
       <td>${fmtTime(r.time)}</td>
       <td><span class="badge ${esc(r.kind)}">${esc(r.kind)}</span></td>
-      <td class="q" title="${esc(r.query)}">${esc(r.query)}</td>
+      <td class="q" title="${esc(r.query)}">${esc(r.query)}${assert}</td>
       <td>${status}</td>
       <td>${r.count}</td>
       <td>${r.latency_ms}</td>
     </tr>`;
   }).join("");
+}
+
+// assertBadge returns a small PASS/FAIL chip if the row was asserted.
+function assertBadge(r) {
+  if (r.assert_pass === undefined || r.assert_pass === null) return "";
+  return r.assert_pass
+    ? ` <span class="chip chip-pass" title="assertion passed">PASS</span>`
+    : ` <span class="chip chip-fail" title="${esc(r.assert_msg)}">FAIL</span>`;
 }
 
 // ---- controls ----
@@ -214,6 +257,10 @@ async function loadConfig() {
   $("appLog").checked = c.logging.app_log;
   $("csvResults").checked = c.logging.csv_results;
 
+  $("assertEnabled").checked = c.assertions.enabled;
+  $("assertLatency").value = c.assertions.max_latency_ms;
+  $("assertMinResults").value = c.assertions.min_results;
+
   toggleBoxes();
 }
 
@@ -289,6 +336,11 @@ $("cfgForm").addEventListener("submit", async (e) => {
       dir: c.logging.dir,
       app_log: $("appLog").checked,
       csv_results: $("csvResults").checked,
+    },
+    assertions: {
+      enabled: $("assertEnabled").checked,
+      max_latency_ms: parseInt($("assertLatency").value, 10) || 0,
+      min_results: parseInt($("assertMinResults").value, 10) || 0,
     },
   };
 

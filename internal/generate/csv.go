@@ -58,7 +58,11 @@ func loadCSV(path string, shuffle bool, rng *rand.Rand) ([]Query, error) {
 		if kind == "" {
 			kind = inferKind(text)
 		}
-		out = append(out, Query{Text: text, Kind: kind})
+		mustContain := ""
+		if len(rec) > 2 {
+			mustContain = strings.TrimSpace(rec[2])
+		}
+		out = append(out, Query{Text: text, Kind: kind, MustContain: mustContain})
 	}
 
 	if len(out) == 0 {

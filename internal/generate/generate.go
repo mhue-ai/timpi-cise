@@ -19,6 +19,9 @@ import (
 type Query struct {
 	Text string
 	Kind string // config.GenTerms | GenPhrases | GenQuestions
+	// MustContain, if set (from a CSV golden-query column), is a substring that
+	// must appear in a result for the query's assertion to pass.
+	MustContain string
 }
 
 // llmClient is a model backend that completes a prompt. The generator builds

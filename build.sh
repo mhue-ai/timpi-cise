@@ -8,7 +8,7 @@ mkdir -p dist
 
 VERSION="${1:-dev}"
 PKG="./cmd/timpicise"
-LDFLAGS="-s -w"   # strip symbols for smaller binaries
+LDFLAGS="-s -w -X main.version=$VERSION"   # strip symbols; embed version
 
 build() {
   local goos="$1" goarch="$2" goarm="${3:-}" out="$4"
