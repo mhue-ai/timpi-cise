@@ -96,6 +96,22 @@ func (c *openaiClient) complete(ctx context.Context, prompt string, maxTokens in
 
 // listModels returns the models the server advertises (GET {base}/models, the
 // OpenAI list-models format used by LM Studio, llama.cpp, vLLM, etc.).
+// errorMessage extracts a human message from an OpenAI-style error field, which
+// may be absent, a plain string (LM Studio), or an object {"message": ...}.
+func errorMessage(v any) string {
+	switch e := v.(type) {
+	case string:
+		return e
+	case map[string]any:
+		if m, ok := e["message"].(string); ok {
+			return m
+		}
+		return "server returned an error"
+	default:
+		return ""
+	}
+}
+
 func (c *openaiClient) listModels(ctx context.Context) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
 	if err != nil {
@@ -116,9 +132,15 @@ func (c *openaiClient) listModels(ctx context.Context) ([]string, error) {
 		Data []struct {
 			ID string `json:"id"`
 		} `json:"data"`
+		Error any `json:"error"` // may be a string (LM Studio) or an object (OpenAI)
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
+	}
+	// A wrong path (e.g. missing /v1) often returns 200 + an error body. Surface
+	// it instead of silently reporting zero models.
+	if msg := errorMessage(out.Error); msg != "" {
+		return nil, fmt.Errorf("%s (check the base URL — LM Studio needs .../v1)", msg)
 	}
 	ids := make([]string, 0, len(out.Data))
 	for _, m := range out.Data {

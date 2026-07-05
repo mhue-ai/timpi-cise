@@ -48,6 +48,33 @@ func TestListModelsOpenAI(t *testing.T) {
 	}
 }
 
+func TestListModelsSurfacesServerError(t *testing.T) {
+	// Servers like LM Studio answer a wrong path with HTTP 200 + an error body.
+	// Those must surface as an error, not a silent empty list.
+	cases := []struct {
+		name, provider, body string
+	}{
+		{"ollama-wrong-path", config.LLMOllama, `{"error":"Unexpected endpoint or method. (GET /api/tags)"}`},
+		{"openai-string-error", config.LLMOpenAI, `{"error":"Unexpected endpoint or method. (GET /models)"}`},
+		{"openai-object-error", config.LLMOpenAI, `{"error":{"message":"invalid api key"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			base := srv.URL
+			if tc.provider == config.LLMOpenAI {
+				base = srv.URL + "/v1"
+			}
+			if _, err := ListModels(context.Background(), tc.provider, base, ""); err == nil {
+				t.Errorf("%s: expected an error, got nil", tc.name)
+			}
+		})
+	}
+}
+
 func TestListModelsUnreachable(t *testing.T) {
 	// Nothing is listening on this port; should error, not panic.
 	if _, err := ListModels(context.Background(), config.LLMOllama, "http://127.0.0.1:1", ""); err == nil {
