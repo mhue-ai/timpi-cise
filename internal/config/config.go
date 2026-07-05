@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -31,6 +32,22 @@ const (
 	GenPhrases   = "phrases"   // multi-word phrases
 	GenQuestions = "questions" // natural-language questions
 	GenMixed     = "mixed"     // a rotating mix of the above
+)
+
+// Query sources.
+const (
+	SourceBuiltin = "builtin" // algorithmic generators (default)
+	SourceCSV     = "csv"     // a user-supplied CSV/line list of queries
+)
+
+// LLM providers for advanced question generation on a local (or remote) server.
+const (
+	// LLMOllama uses Ollama's native /api/generate endpoint.
+	LLMOllama = "ollama"
+	// LLMOpenAI uses any OpenAI-compatible /chat/completions endpoint. This
+	// covers LM Studio, llama.cpp's server, Jan, LocalAI, vLLM,
+	// text-generation-webui, and hosted OpenAI-style APIs.
+	LLMOpenAI = "openai"
 )
 
 // Config is the full application configuration.
@@ -61,24 +78,67 @@ type Config struct {
 
 	// Server controls the local dashboard.
 	Server Server `json:"server"`
+
+	// Logging controls the app log and the CSV results log.
+	Logging Logging `json:"logging"`
 }
 
-// Generation controls query generation.
+// Generation controls where queries come from.
 type Generation struct {
-	// Mode is one of GenTerms, GenPhrases, GenQuestions, GenMixed.
+	// Mode is one of GenTerms, GenPhrases, GenQuestions, GenMixed. It applies
+	// when Source is SourceBuiltin.
 	Mode string `json:"mode"`
 
-	// UseOllama enables optional local-GPU question generation via an Ollama
-	// server. If Ollama is unreachable the tool silently falls back to the
-	// built-in generators.
-	UseOllama bool `json:"use_ollama"`
+	// Source is SourceBuiltin (algorithmic) or SourceCSV (user file).
+	Source string `json:"source"`
 
-	// OllamaURL is the base URL of a local Ollama server (default
-	// http://localhost:11434).
-	OllamaURL string `json:"ollama_url"`
+	// CSVPath is the path to a user CSV/line list of queries, used when
+	// Source == SourceCSV. First column is the query; an optional second column
+	// overrides the kind (terms/phrases/questions).
+	CSVPath string `json:"csv_path"`
 
-	// OllamaModel is the model name to request (e.g. "llama3.2").
-	OllamaModel string `json:"ollama_model"`
+	// Shuffle randomizes the order of CSV queries instead of cycling in order.
+	Shuffle bool `json:"shuffle"`
+
+	// LLM optionally augments question generation using a local (or remote)
+	// model server. Applies to the questions/mixed builtin modes.
+	LLM LLM `json:"llm"`
+}
+
+// LLM configures optional model-backed question generation.
+type LLM struct {
+	// Enabled turns on model-backed question generation. If the server is
+	// unreachable the tool silently falls back to the built-in templates.
+	Enabled bool `json:"enabled"`
+
+	// Provider is LLMOllama or LLMOpenAI (OpenAI-compatible).
+	Provider string `json:"provider"`
+
+	// BaseURL is the server base URL.
+	//   ollama: http://localhost:11434
+	//   openai: http://localhost:1234/v1  (LM Studio), http://localhost:8080/v1
+	//           (llama.cpp), http://localhost:8000/v1 (vLLM), etc.
+	BaseURL string `json:"base_url"`
+
+	// Model is the model name to request (e.g. "llama3.2", "qwen2.5", a path).
+	Model string `json:"model"`
+
+	// APIKey is an optional bearer token for OpenAI-compatible servers that
+	// require one (most local servers ignore it).
+	APIKey string `json:"api_key"`
+}
+
+// Logging controls the app log and the CSV results log.
+type Logging struct {
+	// Dir is the directory for log files. Empty means a per-user default.
+	Dir string `json:"dir"`
+
+	// AppLog enables writing the structured app log to a file (also always to
+	// stderr).
+	AppLog bool `json:"app_log"`
+
+	// CSVResults enables appending each executed query result to a CSV file.
+	CSVResults bool `json:"csv_results"`
 }
 
 // PublicWeb configures how the tool talks to the public search interface.
@@ -146,6 +206,24 @@ type Server struct {
 	Addr string `json:"addr"`
 }
 
+// DefaultLogDir returns the per-user directory for logs and CSV output.
+func DefaultLogDir() string {
+	if dir, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(dir, "timpi-cise", "logs")
+	}
+	return "logs"
+}
+
+// ResultsCSVPath is where the CSV results log is written.
+func (c Config) ResultsCSVPath() string {
+	return filepath.Join(c.Logging.Dir, "results.csv")
+}
+
+// AppLogPath is where the structured app log is written.
+func (c Config) AppLogPath() string {
+	return filepath.Join(c.Logging.Dir, "timpicise.log")
+}
+
 // Default returns a safe default configuration: dry-run mode, one query per
 // minute, mixed generation, dashboard on loopback.
 func Default() Config {
@@ -155,10 +233,14 @@ func Default() Config {
 		JitterSeconds: 15,
 		UserAgent:     "timpi-cise/0.1 (+https://github.com/mhue-ai/timpi-cise; interface-exerciser)",
 		Generation: Generation{
-			Mode:        GenMixed,
-			UseOllama:   false,
-			OllamaURL:   "http://localhost:11434",
-			OllamaModel: "llama3.2",
+			Mode:   GenMixed,
+			Source: SourceBuiltin,
+			LLM: LLM{
+				Enabled:  false,
+				Provider: LLMOllama,
+				BaseURL:  "http://localhost:11434",
+				Model:    "llama3.2",
+			},
 		},
 		PublicWeb: PublicWeb{
 			Method:     "GET",
@@ -175,6 +257,10 @@ func Default() Config {
 			SnippetKey: "snippet",
 		},
 		Server: Server{Addr: "127.0.0.1:8770"},
+		Logging: Logging{
+			AppLog:     true,
+			CSVResults: true,
+		},
 	}
 }
 
@@ -232,14 +318,31 @@ func (c *Config) Sanitize() {
 	default:
 		c.Generation.Mode = GenMixed
 	}
-	if strings.TrimSpace(c.Generation.OllamaURL) == "" {
-		c.Generation.OllamaURL = "http://localhost:11434"
+	switch c.Generation.Source {
+	case SourceBuiltin, SourceCSV:
+	default:
+		c.Generation.Source = SourceBuiltin
 	}
-	if strings.TrimSpace(c.Generation.OllamaModel) == "" {
-		c.Generation.OllamaModel = "llama3.2"
+	switch c.Generation.LLM.Provider {
+	case LLMOllama, LLMOpenAI:
+	default:
+		c.Generation.LLM.Provider = LLMOllama
+	}
+	if strings.TrimSpace(c.Generation.LLM.BaseURL) == "" {
+		if c.Generation.LLM.Provider == LLMOpenAI {
+			c.Generation.LLM.BaseURL = "http://localhost:1234/v1"
+		} else {
+			c.Generation.LLM.BaseURL = "http://localhost:11434"
+		}
+	}
+	if strings.TrimSpace(c.Generation.LLM.Model) == "" {
+		c.Generation.LLM.Model = "llama3.2"
 	}
 	if strings.TrimSpace(c.Server.Addr) == "" {
 		c.Server.Addr = "127.0.0.1:8770"
+	}
+	if strings.TrimSpace(c.Logging.Dir) == "" {
+		c.Logging.Dir = DefaultLogDir()
 	}
 	if strings.TrimSpace(c.PublicWeb.Method) == "" {
 		c.PublicWeb.Method = "GET"
@@ -252,6 +355,15 @@ func (c *Config) Sanitize() {
 // Validate returns an error if the config cannot be used to run in the selected
 // mode (e.g. missing endpoint or key). Dry-run is always valid.
 func (c Config) Validate() error {
+	if c.Generation.Source == SourceCSV {
+		p := strings.TrimSpace(c.Generation.CSVPath)
+		if p == "" {
+			return fmt.Errorf("csv source selected but no csv_path set (upload a file or set a path)")
+		}
+		if _, err := os.Stat(p); err != nil {
+			return fmt.Errorf("csv file not found: %s", p)
+		}
+	}
 	switch c.Mode {
 	case ModeDryRun:
 		return nil

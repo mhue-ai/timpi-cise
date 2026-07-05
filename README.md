@@ -76,25 +76,55 @@ dashboard.
 
 ---
 
-## Query generation
+## Query sources
+
+You choose where queries come from:
+
+### Built-in generator
 
 - **terms** — short generic searches (e.g. `renewable energy`, `chess strategy tips`).
 - **phrases** — multi-word phrases from templates (e.g. `affordable electric vehicles for beginners`).
 - **questions** — natural-language questions (e.g. `how does quantum computing actually work`).
 - **mixed** — rotates through all three.
 
-### Optional: local GPU (Ollama) for advanced questions
+### Your own CSV term list
 
-Enable **"Use local GPU (Ollama) for advanced questions"** to generate richer,
-more varied questions on your own machine via [Ollama](https://ollama.com):
+Select **"my CSV term list"** and upload a `.csv`/`.txt` file (one query per
+line). An optional second column sets the kind (`terms`/`phrases`/`questions`);
+otherwise the kind is inferred from the text. Tick **Shuffle** to randomize the
+order. The uploaded list is saved under the log folder and reused across runs.
 
-1. Install Ollama and pull a small model, e.g. `ollama pull llama3.2`.
-2. Make sure `ollama serve` is running (default `http://localhost:11434`).
-3. Tick the box in the dashboard and set the model name.
+```csv
+best privacy tools
+how does decentralized search work?,questions
+solar panel payback period,phrases
+```
 
-If Ollama isn't reachable, the tool silently falls back to the built-in
-template generator — so this stays optional and the binary stays tiny (the model
-is never bundled).
+### Optional: model server for advanced questions
+
+Enable **"Use a local model server for advanced questions"** to generate richer,
+more varied questions. Two providers are supported:
+
+- **Ollama (native)** — [ollama.com](https://ollama.com); default `http://localhost:11434`.
+- **OpenAI-compatible** — any server exposing `/v1/chat/completions`, including
+  **LM Studio, llama.cpp's server, Jan, LocalAI, vLLM, text-generation-webui**,
+  or a hosted API. Default base URL `http://localhost:1234/v1`. An API key field
+  is available for servers that require one.
+
+If the server is unreachable the tool silently falls back to the built-in
+template generator — so this stays optional and the binary stays tiny (no model
+is ever bundled).
+
+## Logging
+
+- **CSV results log** — every executed query is appended to `results.csv`
+  (time, mode, kind, query, status, count, latency, ok, error, top title).
+  Download it any time from the dashboard, or open the file directly.
+- **App log** — a structured `timpicise.log` capturing lifecycle, config
+  changes, and errors (also echoed to the terminal). Run with `--verbose` for
+  debug-level detail.
+- Both live under a per-user **log folder** shown in the dashboard (overridable
+  via the config file). Both can be toggled off.
 
 ---
 
@@ -135,10 +165,11 @@ single machine, thanks to Go's cross-compilation.
 ```
 cmd/timpicise/        entry point (flags, browser open, shutdown)
 internal/config/      configuration + safety invariants (60s floor)
-internal/generate/    term / phrase / question generators + optional Ollama
+internal/generate/    generators + CSV source + model clients (ollama, openai)
 internal/search/      adapters: dry-run, public-web, official-api
 internal/runner/      the rate-limited polling loop + backoff
 internal/metrics/     thread-safe counters + recent-results buffer
+internal/reslog/      CSV results-log writer
 internal/server/      local dashboard (embedded HTML/CSS/JS + JSON API)
 ```
 

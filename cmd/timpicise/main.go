@@ -11,7 +11,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -29,10 +31,11 @@ import (
 
 func main() {
 	var (
-		cfgPath  = flag.String("config", defaultConfigPath(), "path to config file (created if missing)")
-		addr     = flag.String("addr", "", "override dashboard listen address (e.g. 127.0.0.1:8770)")
-		noOpen   = flag.Bool("no-open", false, "do not open the dashboard in a browser")
+		cfgPath   = flag.String("config", defaultConfigPath(), "path to config file (created if missing)")
+		addr      = flag.String("addr", "", "override dashboard listen address (e.g. 127.0.0.1:8770)")
+		noOpen    = flag.Bool("no-open", false, "do not open the dashboard in a browser")
 		autostart = flag.Bool("start", false, "begin polling immediately on launch")
+		verbose   = flag.Bool("verbose", false, "log at debug level")
 	)
 	flag.Parse()
 
@@ -45,9 +48,15 @@ func main() {
 	}
 	cfg.Sanitize()
 
+	logger, closeLog := setupLogging(cfg, *verbose)
+	defer closeLog()
+
 	met := metrics.New(50)
-	run := runner.New(cfg, *cfgPath, met)
-	srv := server.New(run, met)
+	run := runner.New(cfg, *cfgPath, met, logger)
+	defer run.Close()
+	srv := server.New(run, met, logger)
+
+	logger.Info("timpi-cise starting", "mode", cfg.Mode, "addr", cfg.Server.Addr, "log_dir", cfg.Logging.Dir)
 
 	if *autostart {
 		if err := run.Start(); err != nil {
@@ -80,6 +89,32 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
+}
+
+// setupLogging builds a slog.Logger that writes to stderr and, if enabled, to a
+// log file under the configured log directory. It returns a close function that
+// flushes/closes the file.
+func setupLogging(cfg config.Config, verbose bool) (*slog.Logger, func()) {
+	level := slog.LevelInfo
+	if verbose {
+		level = slog.LevelDebug
+	}
+	writers := []io.Writer{os.Stderr}
+	closeFn := func() {}
+
+	if cfg.Logging.AppLog {
+		if err := os.MkdirAll(cfg.Logging.Dir, 0o755); err == nil {
+			if f, ferr := os.OpenFile(cfg.AppLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr == nil {
+				writers = append(writers, f)
+				closeFn = func() { _ = f.Close() }
+			}
+		}
+	}
+
+	h := slog.NewTextHandler(io.MultiWriter(writers...), &slog.HandlerOptions{Level: level})
+	logger := slog.New(h)
+	slog.SetDefault(logger)
+	return logger, closeFn
 }
 
 // defaultConfigPath places the config next to the executable's working dir under

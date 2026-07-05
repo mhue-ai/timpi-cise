@@ -1,5 +1,6 @@
 // Dashboard front-end. Polls /api/status, renders metrics + recent results, and
-// drives the start/stop and configuration endpoints. No external dependencies.
+// drives the start/stop, configuration, CSV-upload, and download endpoints.
+// No external dependencies.
 
 const $ = (id) => document.getElementById(id);
 
@@ -15,8 +16,7 @@ function fmtDuration(secs) {
 
 function fmtTime(iso) {
   if (!iso) return "";
-  const d = new Date(iso);
-  return d.toLocaleTimeString();
+  return new Date(iso).toLocaleTimeString();
 }
 
 function esc(s) {
@@ -26,8 +26,7 @@ function esc(s) {
 
 async function refresh() {
   try {
-    const r = await fetch("/api/status");
-    const d = await r.json();
+    const d = await (await fetch("/api/status")).json();
     const m = d.metrics;
 
     $("mSent").textContent = m.sent;
@@ -36,6 +35,17 @@ async function refresh() {
     $("mLat").textContent = m.sent ? `${m.avg_latency_ms} ms` : "—";
     $("mUp").textContent = fmtDuration(m.uptime_seconds);
     $("mMode").textContent = `${d.mode} · ${d.adapter}`;
+
+    $("logDir").textContent = d.log_dir || "—";
+    $("csvPath").textContent = d.results_csv_path || "(disabled)";
+
+    // CSV source status line.
+    const cs = $("csvStatus");
+    if (d.source === "csv") {
+      cs.innerHTML = d.csv_error
+        ? `<span class="st-bad">${esc(d.csv_error)}</span>`
+        : `Loaded <strong>${d.csv_count}</strong> queries from your list.`;
+    }
 
     const pill = $("pill");
     if (m.running) {
@@ -51,9 +61,7 @@ async function refresh() {
     }
 
     renderResults(m.recent || []);
-  } catch (e) {
-    // Server not reachable yet; ignore.
-  }
+  } catch (e) { /* server not up yet */ }
 }
 
 function renderResults(rows) {
@@ -80,8 +88,7 @@ function renderResults(rows) {
 // ---- controls ----
 
 $("startBtn").addEventListener("click", async () => {
-  const r = await fetch("/api/start", { method: "POST" });
-  const d = await r.json();
+  const d = await (await fetch("/api/start", { method: "POST" })).json();
   if (d.error) flashCfg(d.error, true);
   refresh();
 });
@@ -91,16 +98,30 @@ $("stopBtn").addEventListener("click", async () => {
   refresh();
 });
 
-// ---- config form ----
+// ---- box visibility ----
 
 function toggleBoxes() {
   const mode = $("mode").value;
   $("webBox").classList.toggle("hidden", mode !== "public-web");
   $("apiBox").classList.toggle("hidden", mode !== "official-api");
-  $("ollamaBox").classList.toggle("hidden", !$("useOllama").checked);
+
+  const source = $("source").value;
+  $("builtinBox").classList.toggle("hidden", source !== "builtin");
+  $("csvBox").classList.toggle("hidden", source !== "csv");
+
+  $("llmBox").classList.toggle("hidden", !$("llmEnabled").checked);
 }
-$("mode").addEventListener("change", toggleBoxes);
-$("useOllama").addEventListener("change", toggleBoxes);
+["mode", "source"].forEach((id) => $(id).addEventListener("change", toggleBoxes));
+$("llmEnabled").addEventListener("change", toggleBoxes);
+
+// Suggest a sensible default base URL when the provider changes.
+$("llmProvider").addEventListener("change", () => {
+  const cur = $("llmBaseURL").value.trim();
+  if (cur === "" || cur === "http://localhost:11434" || cur === "http://localhost:1234/v1") {
+    $("llmBaseURL").value = $("llmProvider").value === "openai"
+      ? "http://localhost:1234/v1" : "http://localhost:11434";
+  }
+});
 
 function flashCfg(msg, isErr) {
   const el = $("cfgMsg");
@@ -109,16 +130,27 @@ function flashCfg(msg, isErr) {
   if (!isErr) setTimeout(() => { el.textContent = ""; }, 3000);
 }
 
+// ---- load config into the form ----
+
+let curConfig = null;
+
 async function loadConfig() {
-  const r = await fetch("/api/config");
-  const c = await r.json();
+  const c = await (await fetch("/api/config")).json();
+  curConfig = c;
+
   $("mode").value = c.mode;
   $("poll").value = c.poll_seconds;
   $("jitter").value = c.jitter_seconds;
+
+  $("source").value = c.generation.source || "builtin";
   $("genMode").value = c.generation.mode;
-  $("useOllama").checked = c.generation.use_ollama;
-  $("ollamaURL").value = c.generation.ollama_url || "";
-  $("ollamaModel").value = c.generation.ollama_model || "";
+  $("shuffle").checked = !!c.generation.shuffle;
+
+  $("llmEnabled").checked = c.generation.llm.enabled;
+  $("llmProvider").value = c.generation.llm.provider || "ollama";
+  $("llmBaseURL").value = c.generation.llm.base_url || "";
+  $("llmModel").value = c.generation.llm.model || "";
+  $("llmKeyState").textContent = c.llm_key_set ? "(saved — blank keeps it)" : "";
 
   $("webEndpoint").value = c.public_web.endpoint || "";
   $("webMethod").value = c.public_web.method || "GET";
@@ -131,58 +163,90 @@ async function loadConfig() {
   $("apiItems").value = c.api.items_path || "";
   $("keyState").textContent = c.api_key_set ? "(a key is saved — leave blank to keep it)" : "(no key saved)";
 
+  $("appLog").checked = c.logging.app_log;
+  $("csvResults").checked = c.logging.csv_results;
+
   toggleBoxes();
 }
 
+// ---- CSV upload ----
+
+$("csvFile").addEventListener("change", async () => {
+  const f = $("csvFile").files[0];
+  if (!f) return;
+  const fd = new FormData();
+  fd.append("file", f);
+  const d = await (await fetch("/api/terms", { method: "POST", body: fd })).json();
+  if (d.error) { flashCfg("CSV: " + d.error, true); return; }
+  flashCfg(`Loaded ${d.csv_count} queries.`, false);
+  await loadConfig();
+  $("source").value = "csv";
+  toggleBoxes();
+  refresh();
+});
+
+// ---- save ----
+
 $("cfgForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  // Client-side guard mirrors the server's hard floor.
   let poll = parseInt($("poll").value, 10) || 60;
-  if (poll < 60) { poll = 60; $("poll").value = 60; }
+  if (poll < 60) { poll = 60; $("poll").value = 60; } // mirror the server floor
 
-  const cur = await (await fetch("/api/config")).json();
+  const c = curConfig || (await (await fetch("/api/config")).json());
   const payload = {
     mode: $("mode").value,
     poll_seconds: poll,
     jitter_seconds: parseInt($("jitter").value, 10) || 0,
-    user_agent: cur.user_agent,
+    user_agent: c.user_agent,
     generation: {
       mode: $("genMode").value,
-      use_ollama: $("useOllama").checked,
-      ollama_url: $("ollamaURL").value.trim(),
-      ollama_model: $("ollamaModel").value.trim(),
+      source: $("source").value,
+      csv_path: c.generation.csv_path, // managed by upload
+      shuffle: $("shuffle").checked,
+      llm: {
+        enabled: $("llmEnabled").checked,
+        provider: $("llmProvider").value,
+        base_url: $("llmBaseURL").value.trim(),
+        model: $("llmModel").value.trim(),
+        api_key: $("llmKey").value, // blank preserves existing
+      },
     },
     public_web: {
       endpoint: $("webEndpoint").value.trim(),
       method: $("webMethod").value,
       query_param: $("webParam").value.trim(),
       items_path: $("webItems").value.trim(),
-      title_key: cur.public_web.title_key,
-      url_key: cur.public_web.url_key,
-      snippet_key: cur.public_web.snippet_key,
+      title_key: c.public_web.title_key,
+      url_key: c.public_web.url_key,
+      snippet_key: c.public_web.snippet_key,
     },
     api: {
       endpoint: $("apiEndpoint").value.trim(),
       method: $("apiMethod").value,
       query_param: $("apiParam").value.trim(),
-      key: $("apiKey").value, // blank preserves existing on the server
-      key_header: cur.api.key_header,
+      key: $("apiKey").value,
+      key_header: c.api.key_header,
       items_path: $("apiItems").value.trim(),
-      title_key: cur.api.title_key,
-      url_key: cur.api.url_key,
-      snippet_key: cur.api.snippet_key,
+      title_key: c.api.title_key,
+      url_key: c.api.url_key,
+      snippet_key: c.api.snippet_key,
     },
-    server: cur.server,
+    server: c.server,
+    logging: {
+      dir: c.logging.dir,
+      app_log: $("appLog").checked,
+      csv_results: $("csvResults").checked,
+    },
   };
 
-  const r = await fetch("/api/config", {
+  const d = await (await fetch("/api/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  });
-  const d = await r.json();
+  })).json();
   if (d.error) { flashCfg(d.error, true); return; }
   $("apiKey").value = "";
+  $("llmKey").value = "";
   flashCfg("Saved.", false);
   loadConfig();
 });

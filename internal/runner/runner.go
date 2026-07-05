@@ -6,6 +6,7 @@ package runner
 
 import (
 	"context"
+	"log/slog"
 	"math/rand/v2"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/mhue-ai/timpi-cise/internal/config"
 	"github.com/mhue-ai/timpi-cise/internal/generate"
 	"github.com/mhue-ai/timpi-cise/internal/metrics"
+	"github.com/mhue-ai/timpi-cise/internal/reslog"
 	"github.com/mhue-ai/timpi-cise/internal/search"
 )
 
@@ -21,27 +23,35 @@ const maxBackoff = 15 * time.Minute
 
 // Runner coordinates generation + execution on a rate-limited loop.
 type Runner struct {
-	mu       sync.Mutex
-	cfg      config.Config
-	cfgPath  string
-	gen      *generate.Generator
-	adapter  search.Adapter
-	met      *metrics.Metrics
-	running  bool
-	stopCh   chan struct{}
-	fails    int
+	mu      sync.Mutex
+	cfg     config.Config
+	cfgPath string
+	log     *slog.Logger
+	gen     *generate.Generator
+	adapter search.Adapter
+	met     *metrics.Metrics
+	res     *reslog.Writer
+	running bool
+	stopCh  chan struct{}
+	fails   int
 }
 
 // New creates a Runner from an initial config. It does not start polling.
-func New(cfg config.Config, cfgPath string, met *metrics.Metrics) *Runner {
+func New(cfg config.Config, cfgPath string, met *metrics.Metrics, log *slog.Logger) *Runner {
 	cfg.Sanitize()
-	return &Runner{
+	if log == nil {
+		log = slog.Default()
+	}
+	r := &Runner{
 		cfg:     cfg,
 		cfgPath: cfgPath,
+		log:     log,
 		gen:     generate.New(cfg.Generation),
 		adapter: search.Build(cfg),
 		met:     met,
 	}
+	r.applyResultsLog(cfg)
+	return r
 }
 
 // Config returns a copy of the current config.
@@ -65,9 +75,30 @@ func (r *Runner) Running() bool {
 	return r.running
 }
 
-// UpdateConfig validates and applies a new config, rebuilding the generator and
-// adapter. It persists the config to disk. The change takes effect on the next
-// loop iteration if polling is active.
+// CSVInfo reports the CSV-source term count and any load error, for the UI.
+func (r *Runner) CSVInfo() (count int, errMsg string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count = r.gen.CSVCount()
+	if err := r.gen.CSVError(); err != nil {
+		errMsg = err.Error()
+	}
+	return
+}
+
+// ResultsCSVPath returns the current CSV results-log path ("" if disabled).
+func (r *Runner) ResultsCSVPath() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.res == nil {
+		return ""
+	}
+	return r.res.Path()
+}
+
+// UpdateConfig validates and applies a new config, rebuilding the generator,
+// adapter, and results log. It persists the config to disk. The change takes
+// effect on the next loop iteration if polling is active.
 func (r *Runner) UpdateConfig(c config.Config) error {
 	c.Sanitize()
 	if err := c.Validate(); err != nil {
@@ -80,10 +111,54 @@ func (r *Runner) UpdateConfig(c config.Config) error {
 	r.fails = 0
 	path := r.cfgPath
 	r.mu.Unlock()
+
+	r.applyResultsLog(c)
+	r.log.Info("config updated", "mode", c.Mode, "source", c.Generation.Source, "poll_seconds", c.PollSeconds)
 	if path != "" {
 		return config.Save(path, c)
 	}
 	return nil
+}
+
+// applyResultsLog opens or closes the CSV results writer to match the config.
+func (r *Runner) applyResultsLog(c config.Config) {
+	r.mu.Lock()
+	cur := r.res
+	curPath := ""
+	if cur != nil {
+		curPath = cur.Path()
+	}
+	want := c.Logging.CSVResults
+	wantPath := c.ResultsCSVPath()
+	r.mu.Unlock()
+
+	if !want {
+		if cur != nil {
+			_ = cur.Close()
+			r.mu.Lock()
+			r.res = nil
+			r.mu.Unlock()
+		}
+		return
+	}
+	if cur != nil && curPath == wantPath {
+		return // already open at the right path
+	}
+	if cur != nil {
+		_ = cur.Close()
+	}
+	w, err := reslog.Open(wantPath)
+	if err != nil {
+		r.log.Error("could not open results CSV", "path", wantPath, "err", err)
+		r.mu.Lock()
+		r.res = nil
+		r.mu.Unlock()
+		return
+	}
+	r.mu.Lock()
+	r.res = w
+	r.mu.Unlock()
+	r.log.Info("results CSV log", "path", wantPath)
 }
 
 // Start begins polling. It is a no-op if already running or if the current
@@ -105,6 +180,7 @@ func (r *Runner) Start() error {
 	r.mu.Unlock()
 
 	r.met.SetRunning(true)
+	r.log.Info("polling started", "mode", r.cfg.Mode, "poll_seconds", r.cfg.PollSeconds)
 	go r.loop(stop)
 	return nil
 }
@@ -121,12 +197,11 @@ func (r *Runner) Stop() {
 	r.stopCh = nil
 	r.mu.Unlock()
 	r.met.SetRunning(false)
+	r.log.Info("polling stopped")
 }
 
 func (r *Runner) loop(stop <-chan struct{}) {
 	for {
-		// Execute one query immediately, then wait. Stop is checked before and
-		// during the wait so shutdown is prompt.
 		select {
 		case <-stop:
 			return
@@ -149,29 +224,31 @@ func (r *Runner) step(stop <-chan struct{}) time.Duration {
 	gen := r.gen
 	adapter := r.adapter
 	cfg := r.cfg
+	res := r.res
 	r.mu.Unlock()
 
-	// Bound the whole query (including any optional Ollama generation) so a
-	// hung backend cannot stall the loop.
+	// Bound the whole query (including any optional model generation) so a hung
+	// backend cannot stall the loop.
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
 
 	q := gen.Next(ctx)
-	res, err := adapter.Search(ctx, q.Text)
+	result, err := adapter.Search(ctx, q.Text)
 
 	summary := metrics.ResultSummary{
 		Time:      time.Now(),
 		Query:     q.Text,
 		Kind:      q.Kind,
-		Status:    res.Status,
-		Count:     res.Count,
-		LatencyMS: res.LatencyMS,
+		Mode:      cfg.Mode,
+		Status:    result.Status,
+		Count:     result.Count,
+		LatencyMS: result.LatencyMS,
 		OK:        err == nil,
 	}
 	if err != nil {
 		summary.Err = err.Error()
 	}
-	for i, it := range res.Items {
+	for i, it := range result.Items {
 		if i >= 3 {
 			break
 		}
@@ -180,8 +257,18 @@ func (r *Runner) step(stop <-chan struct{}) time.Duration {
 		}
 	}
 	r.met.Record(summary)
+	if res != nil {
+		if werr := res.Write(summary); werr != nil {
+			r.log.Error("results CSV write failed", "err", werr)
+		}
+	}
+	if err != nil {
+		r.log.Warn("query failed", "query", q.Text, "status", result.Status, "err", err)
+	} else {
+		r.log.Debug("query ok", "query", q.Text, "kind", q.Kind, "count", result.Count, "latency_ms", result.LatencyMS)
+	}
 
-	return r.nextWait(cfg, err == nil, res.RetryAfter)
+	return r.nextWait(cfg, err == nil, result.RetryAfter)
 }
 
 // nextWait computes the delay before the next query, honoring the safety floor,
@@ -219,4 +306,15 @@ func (r *Runner) nextWait(cfg config.Config, ok bool, retryAfter time.Duration) 
 		wait += time.Duration(rand.IntN(cfg.JitterSeconds+1)) * time.Second
 	}
 	return wait
+}
+
+// Close releases resources (the results log).
+func (r *Runner) Close() {
+	r.mu.Lock()
+	res := r.res
+	r.res = nil
+	r.mu.Unlock()
+	if res != nil {
+		_ = res.Close()
+	}
 }

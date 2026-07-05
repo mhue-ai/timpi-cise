@@ -71,6 +71,8 @@ body {
 .btn-go { background: #143026; border-color: #1f5a41; color: #7ee2b8; }
 .btn-stop { background: #331d20; border-color: #5a2a2f; color: #f0a0a0; }
 .btn-save { background: #16243d; border-color: #274b82; color: #9dc0ff; }
+a.btn { display: inline-block; text-decoration: none; }
+input[type="file"] { padding: 6px; font-size: 13px; }
 
 main { padding: 22px; max-width: 1200px; margin: 0 auto; }
 

@@ -12,15 +12,16 @@ import (
 // It intentionally does not depend on the search package to avoid an import
 // cycle; the runner converts search results into this shape.
 type ResultSummary struct {
-	Time       time.Time `json:"time"`
-	Query      string    `json:"query"`
-	Kind       string    `json:"kind"`   // terms | phrases | questions
-	Status     int       `json:"status"` // HTTP status, or 0 for dry-run
-	Count      int       `json:"count"`  // number of results parsed
-	LatencyMS  int64     `json:"latency_ms"`
-	OK         bool      `json:"ok"`
-	Err        string    `json:"err,omitempty"`
-	TopTitles  []string  `json:"top_titles,omitempty"`
+	Time      time.Time `json:"time"`
+	Query     string    `json:"query"`
+	Kind      string    `json:"kind"`   // terms | phrases | questions
+	Mode      string    `json:"mode"`   // dry-run | public-web | official-api
+	Status    int       `json:"status"` // HTTP status, or 0 for dry-run
+	Count     int       `json:"count"`  // number of results parsed
+	LatencyMS int64     `json:"latency_ms"`
+	OK        bool      `json:"ok"`
+	Err       string    `json:"err,omitempty"`
+	TopTitles []string  `json:"top_titles,omitempty"`
 }
 
 // Metrics holds aggregate counters and recent results.

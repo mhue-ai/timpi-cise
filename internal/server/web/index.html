@@ -66,26 +66,61 @@
             <input id="jitter" name="jitter_seconds" type="number" min="0" max="120" step="5" value="15" />
           </label>
 
-          <label>Query generation
-            <select id="genMode" name="gen_mode">
-              <option value="mixed">mixed (terms + phrases + questions)</option>
-              <option value="terms">terms only</option>
-              <option value="phrases">phrases only</option>
-              <option value="questions">questions only</option>
+          <label>Query source
+            <select id="source" name="source">
+              <option value="builtin">built-in generator</option>
+              <option value="csv">my CSV term list</option>
             </select>
           </label>
 
+          <fieldset id="builtinBox" class="sub">
+            <legend>built-in generator</legend>
+            <label>Generation
+              <select id="genMode" name="gen_mode">
+                <option value="mixed">mixed (terms + phrases + questions)</option>
+                <option value="terms">terms only</option>
+                <option value="phrases">phrases only</option>
+                <option value="questions">questions only</option>
+              </select>
+            </label>
+          </fieldset>
+
+          <fieldset id="csvBox" class="sub hidden">
+            <legend>CSV term list</legend>
+            <p class="hint">Upload a <code>.csv</code> or plain text file — one query per line.
+              Optional second column sets the kind (terms/phrases/questions); otherwise it's inferred.</p>
+            <label>Upload file
+              <input id="csvFile" type="file" accept=".csv,.txt,text/csv,text/plain" />
+            </label>
+            <label class="check">
+              <input id="shuffle" type="checkbox" /> Shuffle order
+            </label>
+            <p id="csvStatus" class="hint"></p>
+          </fieldset>
+
           <label class="check">
-            <input id="useOllama" type="checkbox" />
-            Use local GPU (Ollama) for advanced questions
+            <input id="llmEnabled" type="checkbox" />
+            Use a local model server for advanced questions
           </label>
 
-          <fieldset id="ollamaBox" class="sub hidden">
-            <label>Ollama URL
-              <input id="ollamaURL" type="text" placeholder="http://localhost:11434" />
+          <fieldset id="llmBox" class="sub hidden">
+            <legend>model server (local GPU or remote)</legend>
+            <p class="hint">Works with Ollama or any OpenAI-compatible server
+              (LM Studio, llama.cpp, Jan, LocalAI, vLLM, text-generation-webui).</p>
+            <label>Provider
+              <select id="llmProvider">
+                <option value="ollama">Ollama (native)</option>
+                <option value="openai">OpenAI-compatible</option>
+              </select>
+            </label>
+            <label>Base URL
+              <input id="llmBaseURL" type="text" placeholder="http://localhost:11434" />
             </label>
             <label>Model
-              <input id="ollamaModel" type="text" placeholder="llama3.2" />
+              <input id="llmModel" type="text" placeholder="llama3.2" />
+            </label>
+            <label>API key <span id="llmKeyState" class="hint"></span>
+              <input id="llmKey" type="password" placeholder="optional — most local servers ignore it" />
             </label>
           </fieldset>
 
@@ -124,6 +159,15 @@
             <label>Results JSON path (optional)
               <input id="apiItems" type="text" placeholder="data.results" />
             </label>
+          </fieldset>
+
+          <fieldset class="sub">
+            <legend>logging</legend>
+            <label class="check"><input id="appLog" type="checkbox" /> Write app log file</label>
+            <label class="check"><input id="csvResults" type="checkbox" /> Log every result to CSV</label>
+            <p class="hint">Log folder: <code id="logDir">—</code></p>
+            <p class="hint">Results CSV: <code id="csvPath">—</code></p>
+            <a id="dlCsv" class="btn btn-save" href="/api/results.csv" download>Download results CSV</a>
           </fieldset>
 
           <div class="cfgactions">

@@ -1,7 +1,8 @@
-// Package generate produces search queries: short terms, multi-word phrases, and
-// natural-language questions. Generation is algorithmic by default (word lists +
-// templates + combinatorial randomization) and can optionally be augmented by a
-// local Ollama model for richer, GPU-accelerated question generation.
+// Package generate produces search queries. Queries come either from the
+// built-in algorithmic generators (word lists + templates + combinatorial
+// randomization) or from a user-supplied CSV list. Built-in question generation
+// can optionally be augmented by a local (or remote) model server — Ollama or
+// any OpenAI-compatible endpoint.
 package generate
 
 import (
@@ -19,30 +20,63 @@ type Query struct {
 	Kind string // config.GenTerms | GenPhrases | GenQuestions
 }
 
-// Generator produces queries according to a configuration.
-type Generator struct {
-	cfg    config.Generation
-	rng    *rand.Rand
-	ollama *ollamaClient
-	// rotate cycles through kinds when Mode == mixed.
-	rotate int
+// llmClient is a model backend that can turn a topic into a question.
+type llmClient interface {
+	question(ctx context.Context, topic string) (string, error)
 }
 
-// New builds a Generator. It seeds a PRNG deterministically from the process so
-// runs vary; the optional Ollama client is created lazily only when enabled.
+// Generator produces queries according to a configuration.
+type Generator struct {
+	cfg  config.Generation
+	rng  *rand.Rand
+	llm  llmClient
+	rotate int
+
+	// CSV source state.
+	csv    []Query
+	csvIdx int
+	csvErr error
+}
+
+// New builds a Generator. If the CSV source is selected it is loaded eagerly so
+// any error is visible immediately; the optional model client is created only
+// when generation is enabled.
 func New(cfg config.Generation) *Generator {
-	// rand/v2 top-level functions are already seeded randomly; we keep a local
-	// source so behavior is self-contained and testable.
 	src := rand.NewPCG(rand.Uint64(), rand.Uint64())
 	g := &Generator{cfg: cfg, rng: rand.New(src)}
-	if cfg.UseOllama {
-		g.ollama = newOllamaClient(cfg.OllamaURL, cfg.OllamaModel)
+
+	if cfg.Source == config.SourceCSV {
+		q, err := loadCSV(cfg.CSVPath, cfg.Shuffle, g.rng)
+		g.csv, g.csvErr = q, err
+	}
+
+	if cfg.LLM.Enabled {
+		switch cfg.LLM.Provider {
+		case config.LLMOpenAI:
+			g.llm = newOpenAIClient(cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.APIKey)
+		default:
+			g.llm = newOllamaClient(cfg.LLM.BaseURL, cfg.LLM.Model)
+		}
 	}
 	return g
 }
 
-// Next returns the next generated query. ctx bounds any optional Ollama call.
+// CSVCount returns how many queries were loaded from the CSV source (0 if not
+// using CSV or if loading failed).
+func (g *Generator) CSVCount() int { return len(g.csv) }
+
+// CSVError returns any error from loading the CSV source.
+func (g *Generator) CSVError() error { return g.csvErr }
+
+// Next returns the next generated query. ctx bounds any optional model call.
 func (g *Generator) Next(ctx context.Context) Query {
+	// CSV source takes precedence when it has usable content.
+	if g.cfg.Source == config.SourceCSV && len(g.csv) > 0 {
+		q := g.csv[g.csvIdx%len(g.csv)]
+		g.csvIdx++
+		return q
+	}
+
 	kind := g.cfg.Mode
 	if kind == config.GenMixed {
 		kinds := []string{config.GenTerms, config.GenPhrases, config.GenQuestions}
@@ -88,13 +122,13 @@ func (g *Generator) phrase() string {
 	}
 }
 
-// question returns a natural-language question. When Ollama is enabled and
-// reachable it is used for a richer, more varied question; otherwise a template
-// is filled in. Any Ollama error falls back silently to the template.
+// question returns a natural-language question. When a model client is enabled
+// and reachable it is used for a richer question; otherwise a template is filled
+// in. Any model error falls back silently to the template.
 func (g *Generator) question(ctx context.Context) string {
-	if g.ollama != nil {
+	if g.llm != nil {
 		topic := g.pick(topics)
-		if q, err := g.ollama.question(ctx, topic); err == nil && strings.TrimSpace(q) != "" {
+		if q, err := g.llm.question(ctx, topic); err == nil && strings.TrimSpace(q) != "" {
 			return sanitizeOneLine(q)
 		}
 	}
@@ -102,7 +136,7 @@ func (g *Generator) question(ctx context.Context) string {
 	return fmt.Sprintf(tmpl, g.pick(topics))
 }
 
-// sanitizeOneLine trims an LLM response down to a single clean query line.
+// sanitizeOneLine trims a model response down to a single clean query line.
 func sanitizeOneLine(s string) string {
 	s = strings.TrimSpace(s)
 	if i := strings.IndexAny(s, "\n\r"); i >= 0 {
