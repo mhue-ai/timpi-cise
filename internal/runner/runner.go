@@ -266,9 +266,10 @@ func (r *Runner) step(stop <-chan struct{}) time.Duration {
 	alerter := r.alerter
 	r.mu.Unlock()
 
-	// Bound the whole query (including any optional model generation) so a hung
-	// backend cannot stall the loop.
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	// Bound the whole query (optional model generation + the search) so a hung
+	// backend cannot stall the loop. Generous enough to cover a slow reasoning
+	// model generating a query AND a headless-browser search after it.
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	q := gen.Next(ctx)

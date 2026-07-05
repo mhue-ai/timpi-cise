@@ -200,21 +200,26 @@ func (g *Generator) fromModel(ctx context.Context, kind, topic string) string {
 	return res
 }
 
+// Token budgets are generous so that *reasoning* models (qwen3, deepseek-r1,
+// etc.) have room to finish their hidden "thinking" AND still emit the answer —
+// with a small budget they spend it all reasoning and return empty content.
+// These are caps: ordinary instruct models stop at their end token well before
+// the cap, so a larger budget costs them nothing.
 func promptFor(kind, topic string) (prompt string, maxTokens int) {
 	switch kind {
 	case config.GenTerms:
 		return fmt.Sprintf(
 			"Give ONE short web search term (1-3 words) related to \"%s\". "+
-				"Reply with only the term, lowercase, no punctuation, no quotes.", topic), 12
+				"Reply with only the term, lowercase, no punctuation, no quotes.", topic), 1024
 	case config.GenPhrases:
 		return fmt.Sprintf(
 			"Give ONE natural multi-word search phrase (4-8 words) someone might "+
-				"type about \"%s\". Reply with only the phrase, no quotes.", topic), 24
+				"type about \"%s\". Reply with only the phrase, no quotes.", topic), 1024
 	default: // questions
 		return fmt.Sprintf(
 			"Generate ONE realistic, specific search-engine question a curious "+
 				"person might type about \"%s\". Reply with only the question, no "+
-				"quotes, no preamble.", topic), 40
+				"quotes, no preamble.", topic), 1536
 	}
 }
 

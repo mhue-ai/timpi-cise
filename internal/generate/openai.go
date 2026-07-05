@@ -27,7 +27,7 @@ func newOpenAIClient(baseURL, model, apiKey string) *openaiClient {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		model:   model,
 		apiKey:  apiKey,
-		hc:      &http.Client{Timeout: 25 * time.Second},
+		hc:      &http.Client{Timeout: 60 * time.Second}, // reasoning models can take a few seconds
 	}
 }
 
