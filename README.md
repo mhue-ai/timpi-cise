@@ -94,6 +94,7 @@ Yes — it's deliberately built to be a gentle, good-neighbor tool, not a way to
 
 - **Live dashboard** — see every search and its results as they happen.
 - **Realistic queries** — a built-in library of real-world searches, or upload your own list.
+- **Optional local AI** — if you run Ollama or LM Studio, it can generate the search questions with your own model (falls back to the built-in generator if not).
 - **Health metrics** — success rate, zero-result rate, response-time percentiles, and hour-long trend charts.
 - **Checks & alerts** — set expectations (e.g. "a search should return at least 3 results in under 2 seconds") and get a notification (Slack/Discord/webhook) if things go wrong.
 - **Keeps history** — stats survive restarts, and every search is saved to a spreadsheet-friendly CSV file you can download.

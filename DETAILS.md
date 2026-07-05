@@ -76,9 +76,22 @@ API). Choose per type — short terms / long phrases / questions — whether it 
 from the model or the built-in CPU generator. If the server is unreachable, every
 type falls back to CPU. No model is bundled.
 
-Click **"Fetch installed models"** to poll the server (Ollama's `/api/tags` or the
-OpenAI-compatible `/models`) and pick from what's actually installed, rather than
-typing the model name. Errors (e.g. the server isn't running) are shown inline.
+**Picking a model.** The tool polls your server for the models it has available
+(Ollama's `/api/tags` or the OpenAI-compatible `/models`, via `POST
+/api/llm/models`) and shows them in a **dropdown**, so you select rather than
+type. It refreshes automatically when you enable the server, switch the provider,
+or change the base URL — or on demand via **Fetch installed models**. Wrong
+settings produce a clear inline message rather than an empty list.
+
+**LM Studio:** choose the **OpenAI-compatible** provider and a base URL ending in
+`/v1` (e.g. `http://localhost:1234/v1`), and make sure the model is **loaded** in
+LM Studio (the server only serves loaded models).
+
+**Reasoning models** (qwen3, deepseek-r1, etc.) work but are slower: they spend
+hundreds of hidden "thinking" tokens before answering, so the generation token
+budget is sized generously to let them finish (a small budget makes them return
+empty output). For faster, lighter generation, load a small **instruct** model.
+An embeddings-only model can be listed but cannot generate text.
 
 ## Assertions & golden queries (monitor mode)
 
