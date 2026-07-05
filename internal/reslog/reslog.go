@@ -6,17 +6,33 @@
 package reslog
 
 import (
+	"bufio"
 	"encoding/csv"
 	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/mhue-ai/timpi-cise/internal/metrics"
 )
+
+// firstLine returns the first line of a file, or "" on any error.
+func firstLine(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	if sc.Scan() {
+		return strings.TrimRight(sc.Text(), "\r\n")
+	}
+	return ""
+}
 
 // ErrClosed is returned by Write after the writer has been closed.
 var ErrClosed = errors.New("reslog: writer is closed")
@@ -48,6 +64,20 @@ func Open(path string, log *slog.Logger) (*Writer, error) {
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
+	}
+	// If an existing file has a different (older) header, archive it so new rows
+	// aren't appended under a mismatched schema.
+	if info, serr := os.Stat(path); serr == nil && info.Size() > 0 {
+		if existing := firstLine(path); existing != "" && existing != strings.Join(header, ",") {
+			ts := time.Now().Format("20060102-150405")
+			ext := filepath.Ext(path)
+			archived := path[:len(path)-len(ext)] + "-" + ts + ext
+			if rerr := os.Rename(path, archived); rerr != nil {
+				log.Warn("results CSV: could not archive old-schema file", "err", rerr)
+			} else {
+				log.Info("results CSV: schema changed since last run, archived old file", "archived", archived)
+			}
+		}
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {

@@ -78,6 +78,38 @@ func TestRotation(t *testing.T) {
 	}
 }
 
+func TestArchivesOldSchemaHeader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "results.csv")
+	// Simulate a file written by an older version with fewer columns.
+	old := "time,mode,kind,query,status,count,latency_ms,ok,error,top_title\n" +
+		"2026-01-01T00:00:00Z,dry-run,terms,old,0,1,0,true,,x\n"
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w, err := Open(path, quiet())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	// The current file must now start with the NEW header.
+	if got := firstLine(path); got != strings.Join(header, ",") {
+		t.Errorf("current file header = %q, want new schema", got)
+	}
+	// The old file must have been archived (not lost).
+	entries, _ := os.ReadDir(dir)
+	var archived bool
+	for _, e := range entries {
+		if e.Name() != "results.csv" && strings.HasPrefix(e.Name(), "results-") {
+			archived = true
+		}
+	}
+	if !archived {
+		t.Errorf("old-schema file was not archived: %v", entries)
+	}
+}
+
 func TestUseAfterClose(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "results.csv")
 	w, _ := Open(path, quiet())
