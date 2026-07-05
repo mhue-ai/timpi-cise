@@ -150,6 +150,9 @@
             <label>Base URL
               <input id="llmBaseURL" type="text" placeholder="http://localhost:11434" />
             </label>
+            <label id="llmModelSelectLabel" class="hidden">Installed models (select one)
+              <select id="llmModelSelect"></select>
+            </label>
             <label>Model
               <input id="llmModel" type="text" list="llmModels" placeholder="llama3.2 — or fetch installed models →" />
               <datalist id="llmModels"></datalist>

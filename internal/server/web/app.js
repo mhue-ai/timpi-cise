@@ -236,16 +236,31 @@ async function fetchModels() {
       return;
     }
     const models = d.models || [];
+    // Autocomplete for the free-text box.
     $("llmModels").innerHTML = models.map((m) => `<option value="${esc(m)}"></option>`).join("");
+    // Visible dropdown so the fetched models are actually shown, not hidden in
+    // an autocomplete.
+    const sel = $("llmModelSelect");
+    const current = $("llmModel").value.trim();
+    sel.innerHTML =
+      `<option value="">— select a model —</option>` +
+      models.map((m) => `<option value="${esc(m)}"${m === current ? " selected" : ""}>${esc(m)}</option>`).join("");
+    $("llmModelSelectLabel").classList.toggle("hidden", models.length === 0);
     st.innerHTML = models.length
-      ? `<span class="st-ok">✓ ${models.length} model${models.length > 1 ? "s" : ""} found — pick one from the box above</span>`
-      : `<span class="st-bad">no models installed on the server</span>`;
-    if (models.length && !$("llmModel").value.trim()) $("llmModel").value = models[0];
+      ? `<span class="st-ok">✓ ${models.length} model${models.length > 1 ? "s" : ""} found — choose one from the dropdown above</span>`
+      : `<span class="st-bad">no models loaded on the server — load one in LM Studio, then re-fetch</span>`;
+    if (models.length && !current) $("llmModel").value = models[0];
   } catch (e) {
     if (token === fetchModelsToken) st.innerHTML = `<span class="st-bad">✗ request failed</span>`;
   }
 }
 $("fetchModels").addEventListener("click", fetchModels);
+
+// Selecting from the visible dropdown fills the model field.
+$("llmModelSelect").addEventListener("change", () => {
+  const v = $("llmModelSelect").value;
+  if (v) $("llmModel").value = v;
+});
 
 // Auto-refresh the model list when the server is enabled or the base URL changes,
 // so the picker stays current without a manual click.
