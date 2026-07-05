@@ -23,7 +23,7 @@ func newOllamaClient(baseURL, model string) *ollamaClient {
 	return &ollamaClient{
 		baseURL: baseURL,
 		model:   model,
-		hc:      &http.Client{Timeout: 20 * time.Second},
+		hc:      &http.Client{Timeout: 60 * time.Second}, // reasoning models can take a few seconds
 	}
 }
 
