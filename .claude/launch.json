@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "timpicise",
+      "runtimeExecutable": "dist/timpicise.exe",
+      "runtimeArgs": ["--addr", "127.0.0.1:8770", "--no-open", "--start"],
+      "port": 8770
+    }
+  ]
+}

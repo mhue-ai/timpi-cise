@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>timpi-cise — Timpi interface exerciser</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◎</span>
+      <div>
+        <h1>timpi-cise</h1>
+        <p class="tag">Timpi search interface exerciser</p>
+      </div>
+    </div>
+    <div class="runstate">
+      <span id="pill" class="pill pill-stopped" role="status" aria-live="polite">stopped</span>
+      <button id="startBtn" class="btn btn-go" aria-label="Start polling">Start</button>
+      <button id="stopBtn" class="btn btn-stop" disabled aria-label="Stop polling">Stop</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <div id="alertBanner" class="alertbanner hidden" role="alert" aria-live="assertive"></div>
+
+    <section class="cards">
+      <div class="card"><div class="k">Queries sent</div><div id="mSent" class="v">0</div></div>
+      <div class="card"><div class="k">Successful</div><div id="mOK" class="v ok">0</div></div>
+      <div class="card"><div class="k">Failed</div><div id="mFail" class="v bad">0</div></div>
+      <div class="card"><div class="k">Zero-result rate</div><div id="mZero" class="v">—</div></div>
+      <div class="card"><div class="k">Latency p50 / p95 / p99</div><div id="mPct" class="v small">—</div></div>
+      <div class="card"><div class="k">Assertions</div><div id="mAssert" class="v small">off</div></div>
+      <div class="card"><div class="k">Uptime</div><div id="mUp" class="v">—</div></div>
+      <div class="card"><div class="k">Mode / adapter</div><div id="mMode" class="v small">—</div></div>
+    </section>
+
+    <section class="panel trends">
+      <h2>Trends (last hour, per minute)</h2>
+      <div class="sparks">
+        <div class="spark">
+          <div class="spark-h"><span>Avg latency (ms)</span><span id="sparkLatMax" class="spark-max"></span></div>
+          <svg id="sparkLat" viewBox="0 0 300 48" preserveAspectRatio="none" role="img" aria-label="Average latency over the last hour"></svg>
+        </div>
+        <div class="spark">
+          <div class="spark-h"><span>Success rate</span><span id="sparkOkMax" class="spark-max"></span></div>
+          <svg id="sparkOk" viewBox="0 0 300 48" preserveAspectRatio="none" role="img" aria-label="Success rate over the last hour"></svg>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel live" id="livePanel" aria-labelledby="liveHeading">
+      <div class="livehead">
+        <h2 id="liveHeading">Live results</h2>
+        <span id="liveBeat" class="beat" role="status" aria-live="polite">idle</span>
+      </div>
+      <div id="liveBody" class="livebody" aria-live="polite">
+        <p class="livehint">Press <strong>Start</strong> — the latest query and its results appear here so you can see it working.</p>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>Recent queries</h2>
+        <div class="tablewrap">
+          <table id="results" aria-label="Recent queries">
+            <thead>
+              <tr>
+                <th scope="col">Time</th><th scope="col">Kind</th><th scope="col">Query</th>
+                <th scope="col">Status</th><th scope="col">Results</th><th scope="col">ms</th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody">
+              <tr class="empty"><td colspan="6">No queries yet. Configure a mode and press Start.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Configuration</h2>
+        <form id="cfgForm" class="cfg">
+          <label>Connection mode
+            <select id="mode" name="mode">
+              <option value="dry-run">dry-run (no network — safe default)</option>
+              <option value="browser">browser (drive the real timpi.com UI)</option>
+              <option value="public-web">public-web (a REST search endpoint)</option>
+              <option value="official-api">official-api (your Timpi key)</option>
+            </select>
+          </label>
+
+          <label>Polling interval (seconds — minimum 60)
+            <input id="poll" name="poll_seconds" type="number" min="60" step="5" value="60" />
+          </label>
+
+          <label>Random jitter (extra seconds, 0–120)
+            <input id="jitter" name="jitter_seconds" type="number" min="0" max="120" step="5" value="15" />
+          </label>
+
+          <label>Query source
+            <select id="source" name="source">
+              <option value="builtin">built-in generator</option>
+              <option value="csv">my CSV term list</option>
+            </select>
+          </label>
+
+          <fieldset id="builtinBox" class="sub">
+            <legend>built-in generator</legend>
+            <label>Generation
+              <select id="genMode" name="gen_mode">
+                <option value="realistic">realistic (real-world queries, head-weighted)</option>
+                <option value="mixed">mixed (terms + phrases + questions)</option>
+                <option value="terms">terms only</option>
+                <option value="phrases">phrases only</option>
+                <option value="questions">questions only</option>
+              </select>
+            </label>
+          </fieldset>
+
+          <fieldset id="csvBox" class="sub hidden">
+            <legend>CSV term list</legend>
+            <p class="hint">Upload a <code>.csv</code> or plain text file — one query per line.
+              Optional second column sets the kind (terms/phrases/questions); otherwise it's inferred.</p>
+            <label>Upload file
+              <input id="csvFile" type="file" accept=".csv,.txt,text/csv,text/plain" />
+            </label>
+            <label class="check">
+              <input id="shuffle" type="checkbox" /> Shuffle order
+            </label>
+            <p id="csvStatus" class="hint"></p>
+          </fieldset>
+
+          <label class="check">
+            <input id="llmEnabled" type="checkbox" />
+            Use a local model server for advanced questions
+          </label>
+
+          <fieldset id="llmBox" class="sub hidden">
+            <legend>model server (local GPU or remote)</legend>
+            <p class="hint">Works with Ollama or any OpenAI-compatible server
+              (LM Studio, llama.cpp, Jan, LocalAI, vLLM, text-generation-webui).</p>
+            <label>Provider
+              <select id="llmProvider">
+                <option value="ollama">Ollama (native)</option>
+                <option value="openai">OpenAI-compatible</option>
+              </select>
+            </label>
+            <label>Base URL
+              <input id="llmBaseURL" type="text" placeholder="http://localhost:11434" />
+            </label>
+            <label>Model
+              <input id="llmModel" type="text" placeholder="llama3.2" />
+            </label>
+            <label>API key <span id="llmKeyState" class="hint"></span>
+              <input id="llmKey" type="password" placeholder="optional — most local servers ignore it" />
+            </label>
+            <div class="kinds">
+              <span class="hint">Use the model for:</span>
+              <label class="check"><input id="llmTerms" type="checkbox" /> short terms</label>
+              <label class="check"><input id="llmPhrases" type="checkbox" /> long phrases</label>
+              <label class="check"><input id="llmQuestions" type="checkbox" /> questions</label>
+              <p class="hint">Unticked types use the built-in CPU generator. If the server is unreachable, all types fall back to CPU.</p>
+            </div>
+          </fieldset>
+
+          <fieldset id="webBox" class="sub hidden">
+            <legend>public-web endpoint</legend>
+            <p class="hint">Capture this once from timpi.com → DevTools → Network → run a search →
+              copy the request that returns results. Use <code>{query}</code> as a placeholder or set a query param.</p>
+            <label>Endpoint URL
+              <input id="webEndpoint" type="text" placeholder="https://…/search?q={query}" />
+            </label>
+            <label>Method
+              <select id="webMethod"><option>GET</option><option>POST</option></select>
+            </label>
+            <label>Query param (if no {query})
+              <input id="webParam" type="text" placeholder="q" />
+            </label>
+            <label>Results JSON path (optional)
+              <input id="webItems" type="text" placeholder="data.results" />
+            </label>
+          </fieldset>
+
+          <fieldset id="browserBox" class="sub hidden">
+            <legend>browser (real UI)</legend>
+            <p class="hint">Drives an installed Chrome/Edge/Chromium and scrapes the rendered results.
+              This is the faithful way to exercise timpi.com (a Blazor app with no REST API). Requires a browser installed.</p>
+            <label>Results URL (<code>{query}</code> = search term)
+              <input id="brURL" type="text" placeholder="https://timpi.com/search?q={query}" />
+            </label>
+            <label class="check"><input id="brHeadless" type="checkbox" /> Headless (no visible window)</label>
+            <label>Result item selector
+              <input id="brItem" type="text" placeholder=".all-item-content" />
+            </label>
+            <label>Title selector
+              <input id="brTitle" type="text" placeholder="a.title" />
+            </label>
+            <label>Snippet selector
+              <input id="brSnippet" type="text" placeholder=".description" />
+            </label>
+            <label>Cookie-consent accept selector (optional)
+              <input id="brConsent" type="text" placeholder=".iubenda-cs-accept-btn" />
+            </label>
+            <label>Timeout (seconds)
+              <input id="brTimeout" type="number" min="5" max="120" step="5" value="30" />
+            </label>
+            <label>Chrome/Edge path (optional — auto-detected)
+              <input id="brChrome" type="text" placeholder="leave blank to auto-detect" />
+            </label>
+          </fieldset>
+
+          <fieldset id="apiBox" class="sub hidden">
+            <legend>official Data API</legend>
+            <label>Endpoint URL
+              <input id="apiEndpoint" type="text" placeholder="https://api.timpi…/search?q={query}" />
+            </label>
+            <label>Method
+              <select id="apiMethod"><option>GET</option><option>POST</option></select>
+            </label>
+            <label>Query param (if no {query})
+              <input id="apiParam" type="text" placeholder="q" />
+            </label>
+            <label>API key <span id="keyState" class="hint"></span>
+              <input id="apiKey" type="password" placeholder="leave blank to keep current" />
+            </label>
+            <label>Results JSON path (optional)
+              <input id="apiItems" type="text" placeholder="data.results" />
+            </label>
+          </fieldset>
+
+          <fieldset class="sub">
+            <legend>assertions (turn it into a monitor)</legend>
+            <label class="check"><input id="assertEnabled" type="checkbox" /> Check every query against expectations</label>
+            <label>Max latency (ms, 0 = no limit)
+              <input id="assertLatency" type="number" min="0" step="50" value="0" />
+            </label>
+            <label>Minimum results (0 = no limit)
+              <input id="assertMinResults" type="number" min="0" step="1" value="0" />
+            </label>
+            <p class="hint">Golden queries: add a 3rd column to your CSV with a substring a result must contain
+              (e.g. <code>timpi,terms,timpi.io</code>). Those are checked even with assertions off.</p>
+          </fieldset>
+
+          <fieldset class="sub">
+            <legend>alerts (notify on health breaches)</legend>
+            <label class="check"><input id="alertEnabled" type="checkbox" /> Enable alerting</label>
+            <label>Webhook URL (Slack/Discord/generic — optional)
+              <input id="alertWebhook" type="text" placeholder="https://hooks.slack.com/…" />
+            </label>
+            <label>Evaluate over last N queries
+              <input id="alertWindow" type="number" min="5" max="50" step="1" value="20" />
+            </label>
+            <label>Max error rate % (0 = off)
+              <input id="alertErr" type="number" min="0" max="100" step="5" value="0" />
+            </label>
+            <label>Max zero-result rate % (0 = off)
+              <input id="alertZero" type="number" min="0" max="100" step="5" value="0" />
+            </label>
+            <label>Max assertion-failure rate % (0 = off)
+              <input id="alertAssert" type="number" min="0" max="100" step="5" value="0" />
+            </label>
+            <label>Max p95 latency ms (0 = off)
+              <input id="alertP95" type="number" min="0" step="100" value="0" />
+            </label>
+            <label>Re-notify cooldown (seconds)
+              <input id="alertCooldown" type="number" min="30" step="30" value="300" />
+            </label>
+          </fieldset>
+
+          <fieldset class="sub">
+            <legend>logging</legend>
+            <label class="check"><input id="appLog" type="checkbox" /> Write app log file</label>
+            <label class="check"><input id="csvResults" type="checkbox" /> Log every result to CSV</label>
+            <label class="check"><input id="persistMetrics" type="checkbox" /> Persist metrics across restarts</label>
+            <p class="hint">Log folder: <code id="logDir">—</code></p>
+            <p class="hint">Results CSV: <code id="csvPath">—</code></p>
+            <a id="dlCsv" class="btn btn-save" href="/api/results.csv" download>Download results CSV</a>
+          </fieldset>
+
+          <div class="cfgactions">
+            <button type="submit" class="btn btn-save">Save configuration</button>
+            <span id="cfgMsg" class="msg"></span>
+          </div>
+        </form>
+        <p class="foot">Safety: minimum one query per minute is enforced by the program and cannot be lowered.</p>
+      </section>
+    </div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

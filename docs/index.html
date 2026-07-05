@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>timpi-cise — a friendly heartbeat monitor for Timpi search</title>
+<meta name="description" content="A tiny app that runs real searches on Timpi and shows you, live in your browser, that it's working. One file, no setup, runs on Windows, Mac, Linux, and Raspberry Pi." />
+<style>
+  :root {
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2a323d;
+    --text:#e6edf3; --muted:#8b98a5; --accent:#3fb6a8; --accent2:#4f8cff;
+    --ok:#3fb950; --warn:#d29922; --red:#ff5c6c;
+    --maxw:1080px;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; line-height:1.6;
+  }
+  a { color:var(--accent); }
+  .wrap { max-width:var(--maxw); margin:0 auto; padding:0 22px; }
+
+  /* Nav */
+  nav {
+    position:sticky; top:0; z-index:10; backdrop-filter:blur(8px);
+    background:rgba(14,17,22,.8); border-bottom:1px solid var(--line);
+  }
+  .navrow { display:flex; align-items:center; justify-content:space-between; height:60px; }
+  .logo { display:flex; align-items:center; gap:10px; font-weight:700; font-size:18px; }
+  .logo .mark { color:var(--accent); font-size:26px; }
+  .navlinks a { color:var(--muted); text-decoration:none; margin-left:20px; font-size:14.5px; }
+  .navlinks a:hover { color:var(--text); }
+
+  /* Buttons */
+  .btn {
+    display:inline-block; padding:12px 22px; border-radius:10px; font-weight:600;
+    text-decoration:none; font-size:15px; border:1px solid transparent; transition:.15s;
+  }
+  .btn-primary { background:var(--accent); color:#06231f; }
+  .btn-primary:hover { filter:brightness(1.1); }
+  .btn-ghost { background:transparent; border-color:var(--line); color:var(--text); }
+  .btn-ghost:hover { border-color:var(--accent); }
+
+  /* Hero */
+  .hero { text-align:center; padding:80px 0 60px; }
+  .hero .pill {
+    display:inline-block; font-size:12.5px; color:var(--accent); background:#12302b;
+    border:1px solid #1f5049; padding:5px 14px; border-radius:999px; margin-bottom:22px; letter-spacing:.3px;
+  }
+  .hero h1 { font-size:clamp(30px,5vw,52px); line-height:1.1; margin:0 0 18px; letter-spacing:-.5px; }
+  .hero h1 .grad { background:linear-gradient(90deg,var(--accent),var(--accent2)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .hero p.lead { font-size:clamp(17px,2.2vw,21px); color:var(--muted); max-width:680px; margin:0 auto 32px; }
+  .cta { display:flex; gap:14px; justify-content:center; flex-wrap:wrap; }
+  .subnote { color:var(--muted); font-size:13.5px; margin-top:18px; }
+
+  /* Terminal mock */
+  .mock {
+    max-width:680px; margin:48px auto 0; background:#0b0e13; border:1px solid var(--line);
+    border-radius:12px; overflow:hidden; text-align:left; box-shadow:0 20px 60px rgba(0,0,0,.4);
+  }
+  .mock .bar { display:flex; gap:7px; padding:12px 14px; border-bottom:1px solid var(--line); background:var(--panel); }
+  .mock .bar span { width:11px; height:11px; border-radius:50%; }
+  .mock .code { padding:18px 20px; font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:14px; color:#c7d2dd; }
+  .mock .code .c { color:var(--muted); }
+  .mock .code .g { color:var(--ok); }
+  .mock .code .a { color:var(--accent); }
+
+  /* Sections */
+  section { padding:56px 0; border-top:1px solid var(--line); }
+  h2 { font-size:clamp(24px,3.5vw,32px); margin:0 0 12px; letter-spacing:-.3px; }
+  .lead-sub { color:var(--muted); max-width:640px; margin:0 0 36px; font-size:17px; }
+  .center { text-align:center; }
+  .center .lead-sub { margin-left:auto; margin-right:auto; }
+
+  /* Steps */
+  .steps { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  .step { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:24px; }
+  .step .n { width:34px; height:34px; border-radius:9px; background:#12302b; color:var(--accent); font-weight:700;
+    display:flex; align-items:center; justify-content:center; margin-bottom:14px; }
+  .step h3 { margin:0 0 8px; font-size:17px; }
+  .step p { margin:0; color:var(--muted); font-size:14.5px; }
+
+  /* Features */
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px; }
+  .card .ico { font-size:24px; margin-bottom:12px; }
+  .card h3 { margin:0 0 6px; font-size:16px; }
+  .card p { margin:0; color:var(--muted); font-size:14px; }
+
+  /* Install */
+  .os-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:22px; }
+  .os { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; }
+  .os h4 { margin:0 0 6px; font-size:15px; }
+  .os code { color:var(--accent); font-size:13px; word-break:break-all; }
+  pre {
+    background:#0b0e13; border:1px solid var(--line); border-radius:12px; padding:16px 18px;
+    overflow-x:auto; font-size:13.5px; color:#c7d2dd; margin:0;
+  }
+  pre .c { color:var(--muted); }
+
+  /* Safety */
+  .safety { background:linear-gradient(180deg,#12241f,#0e1116); border:1px solid #1f5049; border-radius:16px; padding:32px; }
+  .safety ul { margin:14px 0 0; padding-left:0; list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .safety li { color:var(--muted); font-size:14.5px; }
+  .safety li b { color:var(--text); }
+
+  footer { border-top:1px solid var(--line); padding:34px 0; color:var(--muted); font-size:14px; }
+  .footrow { display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px; align-items:center; }
+  footer a { color:var(--muted); text-decoration:none; margin-left:18px; }
+  footer a:hover { color:var(--text); }
+
+  @media (max-width:760px) {
+    .steps, .grid { grid-template-columns:1fr; }
+    .safety ul { grid-template-columns:1fr; }
+    .navlinks a:not(.btn) { display:none; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap navrow">
+    <div class="logo"><span class="mark">◎</span> timpi-cise</div>
+    <div class="navlinks">
+      <a href="#what">What it is</a>
+      <a href="#how">How it works</a>
+      <a href="#install">Install</a>
+      <a class="btn btn-ghost" href="https://github.com/mhue-ai/timpi-cise">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="pill">Free &amp; open source · one small file · no setup</span>
+    <h1>A friendly heartbeat monitor<br />for <span class="grad">Timpi search</span></h1>
+    <p class="lead">A tiny app you run on your own computer. It sends real searches to Timpi
+      — gently, at most one a minute — and shows you, live in your browser, that it's working.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/mhue-ai/timpi-cise/releases/latest">Download</a>
+      <a class="btn btn-ghost" href="https://github.com/mhue-ai/timpi-cise">View on GitHub</a>
+    </div>
+    <p class="subnote">Windows · macOS · Linux · Raspberry Pi</p>
+
+    <div class="mock" role="img" aria-label="Terminal showing the app starting and opening a dashboard">
+      <div class="bar"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span></div>
+      <div class="code">
+        <span class="c">$</span> ./timpicise<br />
+        timpi-cise dashboard: <span class="a">http://127.0.0.1:8770</span><br />
+        mode: dry-run | interval: 60 s (min 60)<br />
+        <span class="c"># browser opens automatically…</span><br />
+        <span class="g">✓ best budget laptop</span> — 11 results · 812 ms
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="what">
+  <div class="wrap">
+    <h2>What is this, in plain English?</h2>
+    <p class="lead-sub"><a href="https://timpi.io">Timpi</a> is a private, decentralized search
+      engine — an alternative to Google that doesn't track you. <b style="color:var(--text)">timpi-cise</b>
+      is a small program that exercises that search and shows you how it's doing.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="n">1</div>
+        <h3>Makes up searches</h3>
+        <p>It generates realistic, everyday search queries — like "best budget laptop" or "how does compost work".</p>
+      </div>
+      <div class="step">
+        <div class="n">2</div>
+        <h3>Searches Timpi</h3>
+        <p>It runs those searches on Timpi gently — never more than one per minute — using a real browser behind the scenes.</p>
+      </div>
+      <div class="step">
+        <div class="n">3</div>
+        <h3>Shows you it works</h3>
+        <p>A live dashboard shows each search, the results it found, how fast it was, and overall health.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2>How to use it</h2>
+    <p class="lead-sub">Three clicks and you're watching it work.</p>
+    <div class="grid">
+      <div class="card"><div class="ico">⬇️</div><h3>1. Download &amp; run</h3><p>Grab the file for your computer and open it. Your browser pops open with the dashboard.</p></div>
+      <div class="card"><div class="ico">🌐</div><h3>2. Pick a mode</h3><p>Choose <b>browser mode</b> to run real searches on timpi.com. It starts in a safe practice mode by default.</p></div>
+      <div class="card"><div class="ico">▶️</div><h3>3. Press Start</h3><p>Watch the Live Results panel fill in with real searches and results, one a minute.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Install</h2>
+    <p class="lead-sub">Download one file, run it. No accounts, no Docker, no dependencies.</p>
+    <div class="os-grid">
+      <div class="os"><h4>🪟 Windows</h4><code>timpicise-windows-amd64.exe</code><p style="color:var(--muted);font-size:13px;margin:8px 0 0">Double-click to run.</p></div>
+      <div class="os"><h4>🍎 macOS</h4><code>timpicise-darwin-arm64</code><p style="color:var(--muted);font-size:13px;margin:8px 0 0">Apple Silicon (or -amd64 for Intel).</p></div>
+      <div class="os"><h4>🐧 Linux</h4><code>timpicise-linux-amd64</code><p style="color:var(--muted);font-size:13px;margin:8px 0 0">chmod +x, then run.</p></div>
+      <div class="os"><h4>🍓 Raspberry Pi</h4><code>timpicise-linux-arm64</code><p style="color:var(--muted);font-size:13px;margin:8px 0 0">(armv7 / armv6 for older Pis.)</p></div>
+    </div>
+    <div style="text-align:center;margin-bottom:26px">
+      <a class="btn btn-primary" href="https://github.com/mhue-ai/timpi-cise/releases/latest">Go to Downloads</a>
+    </div>
+    <p class="lead-sub" style="margin-bottom:12px">Prefer to build it yourself? You only need <a href="https://go.dev/dl/">Go</a> 1.26+:</p>
+    <pre><span class="c"># clone, build, run</span>
+git clone https://github.com/mhue-ai/timpi-cise.git
+cd timpi-cise
+go build -o timpicise ./cmd/timpicise
+./timpicise</pre>
+  </div>
+</section>
+
+<section>
+  <div class="wrap center">
+    <h2>What's inside</h2>
+    <p class="lead-sub">A lot more than a search box — a proper little monitor.</p>
+    <div class="grid" style="text-align:left">
+      <div class="card"><div class="ico">📊</div><h3>Live dashboard</h3><p>Every search and its results as they happen, with a pulsing "live" indicator.</p></div>
+      <div class="card"><div class="ico">🎯</div><h3>Realistic queries</h3><p>A built-in library of real-world searches, or upload your own list.</p></div>
+      <div class="card"><div class="ico">📈</div><h3>Health metrics</h3><p>Success rate, zero-result rate, response-time percentiles, and hourly trend charts.</p></div>
+      <div class="card"><div class="ico">🔔</div><h3>Checks &amp; alerts</h3><p>Set expectations and get a Slack/Discord/webhook ping if something goes wrong.</p></div>
+      <div class="card"><div class="ico">💾</div><h3>Keeps history</h3><p>Stats survive restarts; every search is saved to a downloadable CSV.</p></div>
+      <div class="card"><div class="ico">🧩</div><h3>Runs everywhere</h3><p>Windows, Mac, Linux, and Raspberry Pi — all from one small file.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="safety">
+      <h2 style="margin-bottom:6px">🛡️ Built to be a good neighbor</h2>
+      <p style="color:var(--muted);margin:0">It's a gentle monitor, not a way to hammer a service.</p>
+      <ul>
+        <li>🐢 <b>One search per minute, max.</b> Baked in — it can't be turned up.</li>
+        <li>🔒 <b>Runs only on your computer.</b> Private unless you open it up.</li>
+        <li>🙅 <b>Honest by default.</b> Starts sending nothing; tells you the truth about results.</li>
+        <li>🛑 <b>Backs off automatically</b> if the service asks it to slow down.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap footrow">
+    <div>◎ timpi-cise · free &amp; open source · MIT license</div>
+    <div>
+      <a href="https://github.com/mhue-ai/timpi-cise">GitHub</a>
+      <a href="https://github.com/mhue-ai/timpi-cise/releases/latest">Download</a>
+      <a href="https://github.com/mhue-ai/timpi-cise/blob/main/DETAILS.md">Docs</a>
+      <a href="https://timpi.io">About Timpi</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
