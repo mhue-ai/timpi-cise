@@ -189,6 +189,7 @@ $("stopBtn").addEventListener("click", async () => {
 
 function toggleBoxes() {
   const mode = $("mode").value;
+  $("browserBox").classList.toggle("hidden", mode !== "browser");
   $("webBox").classList.toggle("hidden", mode !== "public-web");
   $("apiBox").classList.toggle("hidden", mode !== "official-api");
 
@@ -242,6 +243,15 @@ async function loadConfig() {
   $("llmTerms").checked = !!kinds.terms;
   $("llmPhrases").checked = !!kinds.phrases;
   $("llmQuestions").checked = !!kinds.questions;
+
+  $("brURL").value = c.browser.url || "";
+  $("brHeadless").checked = c.browser.headless;
+  $("brItem").value = c.browser.item_selector || "";
+  $("brTitle").value = c.browser.title_selector || "";
+  $("brSnippet").value = c.browser.snippet_selector || "";
+  $("brConsent").value = c.browser.consent_selector || "";
+  $("brTimeout").value = c.browser.timeout_seconds || 30;
+  $("brChrome").value = c.browser.chrome_path || "";
 
   $("webEndpoint").value = c.public_web.endpoint || "";
   $("webMethod").value = c.public_web.method || "GET";
@@ -310,6 +320,16 @@ $("cfgForm").addEventListener("submit", async (e) => {
           questions: $("llmQuestions").checked,
         },
       },
+    },
+    browser: {
+      url: $("brURL").value.trim(),
+      headless: $("brHeadless").checked,
+      item_selector: $("brItem").value.trim(),
+      title_selector: $("brTitle").value.trim(),
+      snippet_selector: $("brSnippet").value.trim(),
+      consent_selector: $("brConsent").value.trim(),
+      timeout_seconds: parseInt($("brTimeout").value, 10) || 30,
+      chrome_path: $("brChrome").value.trim(),
     },
     public_web: {
       endpoint: $("webEndpoint").value.trim(),

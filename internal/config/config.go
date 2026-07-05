@@ -23,7 +23,8 @@ const MinPollSeconds = 60
 // Connection modes.
 const (
 	ModeDryRun      = "dry-run"      // generate queries, never touch the network (default)
-	ModePublicWeb   = "public-web"   // exercise the public timpi.com search interface
+	ModePublicWeb   = "public-web"   // hit a REST search endpoint over HTTP
+	ModeBrowser     = "browser"      // drive the real timpi.com UI in a headless browser
 	ModeOfficialAPI = "official-api" // use an authenticated Timpi Data API endpoint
 )
 
@@ -76,6 +77,9 @@ type Config struct {
 
 	// API configures the authenticated Data API adapter.
 	API API `json:"api"`
+
+	// Browser configures the headless-browser adapter (drives the real UI).
+	Browser Browser `json:"browser"`
 
 	// Server controls the local dashboard.
 	Server Server `json:"server"`
@@ -233,6 +237,32 @@ type API struct {
 	SnippetKey string `json:"snippet_key"`
 }
 
+// Browser configures the headless-browser adapter, which drives a real search
+// UI (e.g. timpi.com's Blazor app) in an installed Chrome/Edge/Chromium and
+// scrapes the rendered results. This is the faithful way to exercise a search
+// site that has no REST endpoint. It requires a browser to be installed.
+type Browser struct {
+	// URL is the results URL template; {query} is replaced with the URL-encoded
+	// query. For timpi.com the search page reads the query straight from the URL.
+	URL string `json:"url"`
+
+	// ChromePath optionally points at a specific Chrome/Edge/Chromium binary.
+	// Empty means auto-detect from PATH / standard locations.
+	ChromePath string `json:"chrome_path"`
+
+	// Headless runs the browser without a visible window (default true).
+	Headless bool `json:"headless"`
+
+	// Selectors identify the rendered results. Defaults target timpi.com.
+	ItemSelector    string `json:"item_selector"`    // each result container
+	TitleSelector   string `json:"title_selector"`   // title link within an item
+	SnippetSelector string `json:"snippet_selector"` // snippet within an item
+	ConsentSelector string `json:"consent_selector"` // cookie-consent accept button
+
+	// TimeoutSeconds bounds how long to wait for results to render.
+	TimeoutSeconds int `json:"timeout_seconds"`
+}
+
 // Server controls the local dashboard HTTP server.
 type Server struct {
 	// Addr is the listen address for the dashboard (default "127.0.0.1:8770").
@@ -297,6 +327,15 @@ func Default() Config {
 			URLKey:     "url",
 			SnippetKey: "snippet",
 		},
+		Browser: Browser{
+			URL:             "https://timpi.com/search?q={query}",
+			Headless:        true,
+			ItemSelector:    ".all-item-content",
+			TitleSelector:   "a.title",
+			SnippetSelector: ".description",
+			ConsentSelector: ".iubenda-cs-accept-btn",
+			TimeoutSeconds:  30,
+		},
 		Server: Server{Addr: "127.0.0.1:8770"},
 		Logging: Logging{
 			AppLog:     true,
@@ -340,7 +379,7 @@ func Save(path string, c Config) error {
 // Sanitize enforces invariants and fills blanks. It is safe to call repeatedly.
 func (c *Config) Sanitize() {
 	switch c.Mode {
-	case ModeDryRun, ModePublicWeb, ModeOfficialAPI:
+	case ModeDryRun, ModePublicWeb, ModeBrowser, ModeOfficialAPI:
 	default:
 		c.Mode = ModeDryRun
 	}
@@ -402,6 +441,18 @@ func (c *Config) Sanitize() {
 	if strings.TrimSpace(c.API.Method) == "" {
 		c.API.Method = "GET"
 	}
+	if strings.TrimSpace(c.Browser.URL) == "" {
+		c.Browser.URL = "https://timpi.com/search?q={query}"
+	}
+	if strings.TrimSpace(c.Browser.ItemSelector) == "" {
+		c.Browser.ItemSelector = ".all-item-content"
+	}
+	if strings.TrimSpace(c.Browser.TitleSelector) == "" {
+		c.Browser.TitleSelector = "a.title"
+	}
+	if c.Browser.TimeoutSeconds <= 0 {
+		c.Browser.TimeoutSeconds = 30
+	}
 }
 
 // Validate returns an error if the config cannot be used to run in the selected
@@ -424,6 +475,13 @@ func (c Config) Validate() error {
 			return fmt.Errorf("public-web mode needs public_web.endpoint (capture it from timpi.com DevTools Network tab)")
 		}
 		if err := validateEndpoint(c.PublicWeb.Endpoint); err != nil {
+			return err
+		}
+	case ModeBrowser:
+		if strings.TrimSpace(c.Browser.URL) == "" {
+			return fmt.Errorf("browser mode needs browser.url")
+		}
+		if err := validateEndpoint(c.Browser.URL); err != nil {
 			return err
 		}
 	case ModeOfficialAPI:

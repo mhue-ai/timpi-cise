@@ -43,6 +43,8 @@ type Adapter interface {
 // have validated the config first.
 func Build(c config.Config) Adapter {
 	switch c.Mode {
+	case config.ModeBrowser:
+		return newBrowserAdapter(c.Browser, c.UserAgent)
 	case config.ModePublicWeb:
 		return newHTTPAdapter("public-web", httpAdapterOpts{
 			endpoint:   c.PublicWeb.Endpoint,

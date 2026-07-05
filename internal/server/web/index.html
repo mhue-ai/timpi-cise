@@ -79,7 +79,8 @@
           <label>Connection mode
             <select id="mode" name="mode">
               <option value="dry-run">dry-run (no network — safe default)</option>
-              <option value="public-web">public-web (exercise timpi.com)</option>
+              <option value="browser">browser (drive the real timpi.com UI)</option>
+              <option value="public-web">public-web (a REST search endpoint)</option>
               <option value="official-api">official-api (your Timpi key)</option>
             </select>
           </label>
@@ -172,6 +173,34 @@
             </label>
             <label>Results JSON path (optional)
               <input id="webItems" type="text" placeholder="data.results" />
+            </label>
+          </fieldset>
+
+          <fieldset id="browserBox" class="sub hidden">
+            <legend>browser (real UI)</legend>
+            <p class="hint">Drives an installed Chrome/Edge/Chromium and scrapes the rendered results.
+              This is the faithful way to exercise timpi.com (a Blazor app with no REST API). Requires a browser installed.</p>
+            <label>Results URL (<code>{query}</code> = search term)
+              <input id="brURL" type="text" placeholder="https://timpi.com/search?q={query}" />
+            </label>
+            <label class="check"><input id="brHeadless" type="checkbox" /> Headless (no visible window)</label>
+            <label>Result item selector
+              <input id="brItem" type="text" placeholder=".all-item-content" />
+            </label>
+            <label>Title selector
+              <input id="brTitle" type="text" placeholder="a.title" />
+            </label>
+            <label>Snippet selector
+              <input id="brSnippet" type="text" placeholder=".description" />
+            </label>
+            <label>Cookie-consent accept selector (optional)
+              <input id="brConsent" type="text" placeholder=".iubenda-cs-accept-btn" />
+            </label>
+            <label>Timeout (seconds)
+              <input id="brTimeout" type="number" min="5" max="120" step="5" value="30" />
+            </label>
+            <label>Chrome/Edge path (optional — auto-detected)
+              <input id="brChrome" type="text" placeholder="leave blank to auto-detect" />
             </label>
           </fieldset>
 

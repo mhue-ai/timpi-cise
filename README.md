@@ -55,8 +55,26 @@ environment required.
 | Mode | What it does | Needs |
 |------|--------------|-------|
 | **dry-run** (default) | Generates queries and drives the whole pipeline **without any network activity**. Safe for demos and testing. | nothing |
-| **public-web** | Exercises the public `timpi.com` search the way the site itself does. | the search request URL (see below) |
+| **browser** | **Drives the real `timpi.com` search UI** in a headless browser and scrapes the rendered results. This is the faithful way to exercise timpi.com. | an installed Chrome/Edge/Chromium |
+| **public-web** | Hits a REST/JSON search endpoint over plain HTTP. | a REST endpoint (see below) |
 | **official-api** | Uses an authenticated Timpi Data API endpoint. | endpoint URL + API key |
+
+### browser mode (recommended for timpi.com)
+
+`timpi.com` is a **Blazor Server** app — its search runs client-side over a
+SignalR WebSocket, so there's no REST endpoint to hit (see *public-web* below).
+Browser mode solves this by driving a real browser:
+
+1. It launches an installed **Chrome/Edge/Chromium** (auto-detected; override
+   with a path if needed), navigates to `https://timpi.com/search?q={query}`,
+   dismisses the cookie banner, waits for results to render, and scrapes them.
+2. Results (title / URL / snippet) show in the live preview like any other mode.
+3. Defaults target timpi.com's DOM (`.all-item-content` / `a.title` /
+   `.description`); every selector is editable for other sites.
+
+It's heavier than an HTTP call (~a few seconds per query) but is the only way to
+get **real results** from a client-rendered search site. The 1-query/minute floor
+still applies. Requires a browser installed — it is **not** bundled.
 
 ### The destination endpoint (what's best)
 
@@ -70,24 +88,18 @@ public REST/JSON search endpoint** to point an HTTP client at. (`api.timpi.com`
 exists but 404s on search paths; `timpi.com/api/search?q=…` just returns the
 app's HTML shell.)
 
-So:
+So, in order of preference for timpi.com:
 
-- **For real, robust programmatic exercising, use `official-api` mode** with the
-  Timpi **Data API** endpoint + key you request from `hello@timpi.io`. That is
-  the interface Timpi actually provides for machine queries.
-- The **`public-web` default** (`https://timpi.com/api/search?q={query}`) is a
-  best-effort HTTP starting point. Because timpi.com currently returns HTML there
-  rather than JSON, **the app tells you so honestly** — it shows an amber note
-  *"endpoint returned an HTML page, not JSON results"* instead of faking success.
-  Override the field with a real REST endpoint whenever one becomes available.
-- To point at any JSON search API: put the URL in **Endpoint URL** (use `{query}`
-  for the term, or set a **Query param** like `q`), then set **Results JSON path**
-  (e.g. `data.results`) plus the title/url/snippet field names so results parse
-  and show in the live preview.
-
-> **Faithful human-UI exercising** (driving the actual Blazor page in a real
-> browser) is out of scope for the self-contained binary — it would require
-> bundling a headless browser. The Data API is the intended machine path.
+- **`browser` mode** (recommended) — drives the real timpi.com UI and returns
+  real results. See [browser mode](#browser-mode-recommended-for-timpicom) above.
+- **`official-api` mode** — the Timpi **Data API** endpoint + key from
+  `hello@timpi.io`; the interface Timpi provides for machine queries.
+- **`public-web` mode** — for any search engine that *does* expose a REST/JSON
+  endpoint. Put the URL in **Endpoint URL** (use `{query}` for the term, or set a
+  **Query param** like `q`) and a **Results JSON path** (e.g. `data.results`).
+  Against timpi.com's `/api/search` it just returns the HTML app shell, and the
+  app **says so honestly** (amber "returned an HTML page, not JSON" note) rather
+  than faking success — so use browser mode there instead.
 
 ### Configuring `official-api`
 
@@ -231,6 +243,10 @@ go test ./...
 ./build.sh
 ```
 
+The only third-party dependency is [`chromedp`](https://github.com/chromedp/chromedp)
+(pure Go), used for `browser` mode; it drives an installed browser and bundles
+nothing, so the single binary still cross-compiles everywhere.
+
 `build.sh` produces binaries for Windows (amd64/arm64), Linux (amd64/arm64),
 Raspberry Pi (armv7 32-bit, armv6 Pi Zero), and macOS (amd64/arm64) — all from a
 single machine, thanks to Go's cross-compilation.
@@ -243,7 +259,7 @@ single machine, thanks to Go's cross-compilation.
 cmd/timpicise/        entry point (flags, browser open, shutdown)
 internal/config/      configuration + safety invariants (60s floor)
 internal/generate/    generators + CSV source + model clients (ollama, openai)
-internal/search/      adapters: dry-run, public-web, official-api
+internal/search/      adapters: dry-run, browser (chromedp), public-web, official-api
 internal/runner/      the rate-limited polling loop + backoff
 internal/metrics/     counters, latency percentiles, per-minute time series
 internal/reslog/      CSV results-log writer (with rotation)

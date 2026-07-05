@@ -108,6 +108,7 @@ func (r *Runner) UpdateConfig(c config.Config) error {
 		return err
 	}
 	r.mu.Lock()
+	oldAdapter := r.adapter
 	r.cfg = c
 	r.gen = generate.New(c.Generation, r.log)
 	r.adapter = search.Build(c)
@@ -115,6 +116,7 @@ func (r *Runner) UpdateConfig(c config.Config) error {
 	path := r.cfgPath
 	r.mu.Unlock()
 
+	closeAdapter(oldAdapter) // releases the browser if the old adapter held one
 	r.applyResultsLog(c)
 	r.log.Info("config updated", "mode", c.Mode, "source", c.Generation.Source, "poll_seconds", c.PollSeconds)
 	if path != "" {
@@ -391,16 +393,25 @@ func (r *Runner) nextWait(cfg config.Config, ok bool, retryAfter time.Duration) 
 	return wait
 }
 
-// Close stops polling (if running) and releases resources (the results log).
+// Close stops polling (if running) and releases resources (results log, browser).
 func (r *Runner) Close() {
 	r.Stop() // ensure the loop goroutine exits before we close its writer
 	r.mu.Lock()
 	res := r.res
 	r.res = nil
+	adapter := r.adapter
 	r.mu.Unlock()
+	closeAdapter(adapter)
 	if res != nil {
 		if err := res.Close(); err != nil {
 			r.log.Warn("closing results CSV failed", "err", err)
 		}
+	}
+}
+
+// closeAdapter closes an adapter that holds resources (e.g. the browser).
+func closeAdapter(a search.Adapter) {
+	if c, ok := a.(interface{ Close() error }); ok && c != nil {
+		_ = c.Close()
 	}
 }
