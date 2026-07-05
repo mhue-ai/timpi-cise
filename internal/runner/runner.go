@@ -123,7 +123,7 @@ func (r *Runner) UpdateConfig(c config.Config) error {
 	r.cfg = c
 	r.gen = generate.New(c.Generation, r.log)
 	r.adapter = search.Build(c)
-	r.alerter = alert.New(c.Alerts, r.log)
+	r.alerter.Reconfigure(c.Alerts) // preserve cooldown/active state across saves
 	r.fails = 0
 	path := r.cfgPath
 	r.mu.Unlock()

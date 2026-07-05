@@ -33,6 +33,9 @@ type Alerter struct {
 	mu           sync.Mutex
 	lastNotified map[string]time.Time
 	active       []string
+
+	// sendMu bounds webhook posts to one in flight; overlaps are dropped.
+	sendMu sync.Mutex
 }
 
 // New builds an Alerter.
@@ -49,6 +52,15 @@ func New(cfg config.Alerts, log *slog.Logger) *Alerter {
 	}
 }
 
+// Reconfigure updates the thresholds/webhook while preserving cooldown and
+// active state, so saving config doesn't reset alerting (which would re-fire a
+// still-active breach immediately).
+func (a *Alerter) Reconfigure(cfg config.Alerts) {
+	a.mu.Lock()
+	a.cfg = cfg
+	a.mu.Unlock()
+}
+
 // Active returns the currently-firing alert messages (for the dashboard). It
 // always returns a non-nil slice so the JSON field is [] rather than null.
 func (a *Alerter) Active() []string {
@@ -60,18 +72,22 @@ func (a *Alerter) Active() []string {
 
 // Check evaluates the current window and fires/clears alerts.
 func (a *Alerter) Check(m *metrics.Metrics) {
-	if !a.cfg.Enabled {
+	a.mu.Lock()
+	cfg := a.cfg
+	a.mu.Unlock()
+
+	if !cfg.Enabled {
 		a.mu.Lock()
 		a.active = nil
 		a.mu.Unlock()
 		return
 	}
-	ws := m.Window(a.cfg.WindowQueries)
+	ws := m.Window(cfg.WindowQueries)
 	if ws.Count < minSamples {
 		return
 	}
 
-	breaches := a.evaluate(ws)
+	breaches := a.evaluate(cfg, ws)
 
 	a.mu.Lock()
 	wasActive := len(a.active) > 0
@@ -79,7 +95,7 @@ func (a *Alerter) Check(m *metrics.Metrics) {
 	// Decide which breaches to notify: new ones, or ones past their cooldown.
 	var toNotify []string
 	now := a.now()
-	cooldown := time.Duration(a.cfg.CooldownSeconds) * time.Second
+	cooldown := time.Duration(cfg.CooldownSeconds) * time.Second
 	for key, msg := range breaches {
 		last, seen := a.lastNotified[key]
 		if !seen || now.Sub(last) >= cooldown {
@@ -98,17 +114,16 @@ func (a *Alerter) Check(m *metrics.Metrics) {
 
 	if len(toNotify) > 0 {
 		sort.Strings(toNotify)
-		a.notify("🔴 timpi-cise alert", toNotify)
+		a.notify(cfg.WebhookURL, "🔴 timpi-cise alert", toNotify)
 	}
 	if recovered {
-		a.notify("🟢 timpi-cise recovered", []string{"all monitored metrics are back within thresholds"})
+		a.notify(cfg.WebhookURL, "🟢 timpi-cise recovered", []string{"all monitored metrics are back within thresholds"})
 	}
 }
 
 // evaluate returns a map of breachKey → human message for each threshold hit.
-func (a *Alerter) evaluate(ws metrics.WindowStat) map[string]string {
+func (a *Alerter) evaluate(c config.Alerts, ws metrics.WindowStat) map[string]string {
 	out := map[string]string{}
-	c := a.cfg
 	if c.MaxErrorRate > 0 && ws.ErrorRate > c.MaxErrorRate {
 		out["error_rate"] = fmt.Sprintf("error rate %.0f%% > %.0f%% (last %d queries)", ws.ErrorRate*100, c.MaxErrorRate*100, ws.Count)
 	}
@@ -138,22 +153,30 @@ func breachMessages(breaches map[string]string) []string {
 
 // notify logs the alert and posts to the webhook (if configured), off the caller
 // goroutine so a slow webhook never stalls the poll loop.
-func (a *Alerter) notify(title string, msgs []string) {
+func (a *Alerter) notify(webhookURL, title string, msgs []string) {
 	a.log.Warn("alert", "title", title, "detail", strings.Join(msgs, "; "))
-	if a.cfg.WebhookURL == "" {
+	if webhookURL == "" {
 		return
 	}
 	text := title + "\n• " + strings.Join(msgs, "\n• ")
-	go a.postWebhook(text)
+	go a.postWebhook(webhookURL, text)
 }
 
-func (a *Alerter) postWebhook(text string) {
+func (a *Alerter) postWebhook(webhookURL, text string) {
+	// Bound to one in-flight post; if one is already sending, drop this one
+	// rather than piling up goroutines.
+	if !a.sendMu.TryLock() {
+		a.log.Debug("alert webhook: a post is already in flight, skipping")
+		return
+	}
+	defer a.sendMu.Unlock()
+
 	// Fields cover Slack ("text") and Discord ("content"); extra keys are
 	// ignored by both.
 	body, _ := json.Marshal(map[string]any{"text": text, "content": text})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.WebhookURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
 	if err != nil {
 		a.log.Warn("alert webhook: build request failed", "err", err)
 		return

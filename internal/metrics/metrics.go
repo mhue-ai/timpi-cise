@@ -370,7 +370,11 @@ func (m *Metrics) SaveTo(path string) error {
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp) // don't leave an orphaned temp file behind
+		return err
+	}
+	return nil
 }
 
 // LoadFrom restores durable state from path. A missing file is not an error.
@@ -396,6 +400,9 @@ func (m *Metrics) LoadFrom(path string) error {
 	}
 	m.lastQuery, m.lastAt = p.LastQuery, p.LastAt
 	m.lat = p.Lat
+	if len(m.lat) > latWindow {
+		m.lat = m.lat[len(m.lat)-latWindow:]
+	}
 	m.series = m.series[:0]
 	for _, b := range p.Series {
 		m.series = append(m.series, bucket{b.Minute, b.Sent, b.OK, b.Failed, b.SumLat})

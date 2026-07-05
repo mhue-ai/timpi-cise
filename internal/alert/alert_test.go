@@ -90,6 +90,29 @@ func TestAlerterCooldownEdgeTrigger(t *testing.T) {
 	_ = notified
 }
 
+func TestReconfigurePreservesCooldown(t *testing.T) {
+	cfg := config.Alerts{Enabled: true, WindowQueries: 10, MaxErrorRate: 0.5, CooldownSeconds: 300}
+	a := New(cfg, quietLog())
+	base := time.Unix(1000, 0)
+	a.now = func() time.Time { return base }
+
+	mBad := metrics.New(50)
+	feed(mBad, false, 0, 10)
+	a.Check(mBad) // fires; records lastNotified
+	first := a.lastNotified["error_rate"]
+	if first.IsZero() {
+		t.Fatal("expected initial notification")
+	}
+
+	// A config save (e.g. changing an unrelated field) must NOT reset cooldown.
+	cfg.MaxP95MS = 5000
+	a.Reconfigure(cfg)
+	a.Check(mBad)
+	if !a.lastNotified["error_rate"].Equal(first) {
+		t.Error("Reconfigure must preserve cooldown state (should not re-notify)")
+	}
+}
+
 func TestAlerterDisabled(t *testing.T) {
 	a := New(config.Alerts{Enabled: false, WindowQueries: 10, MaxErrorRate: 0.1}, quietLog())
 	m := metrics.New(50)
