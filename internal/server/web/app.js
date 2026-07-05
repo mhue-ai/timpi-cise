@@ -212,8 +212,11 @@ function toggleBoxes() {
 $("llmEnabled").addEventListener("change", toggleBoxes);
 
 // Poll the model server for its installed models and offer them in the datalist.
-$("fetchModels").addEventListener("click", async () => {
+// A token guards against overlapping/auto-triggered fetches racing each other.
+let fetchModelsToken = 0;
+async function fetchModels() {
   const st = $("modelStatus");
+  const token = ++fetchModelsToken;
   st.className = "hint";
   st.textContent = "polling " + ($("llmBaseURL").value.trim() || "server") + "…";
   const payload = {
@@ -227,8 +230,8 @@ $("fetchModels").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })).json();
+    if (token !== fetchModelsToken) return; // a newer fetch superseded this one
     if (d.error) {
-      st.className = "hint";
       st.innerHTML = `<span class="st-bad">✗ ${esc(d.error)}</span>`;
       return;
     }
@@ -239,17 +242,24 @@ $("fetchModels").addEventListener("click", async () => {
       : `<span class="st-bad">no models installed on the server</span>`;
     if (models.length && !$("llmModel").value.trim()) $("llmModel").value = models[0];
   } catch (e) {
-    st.innerHTML = `<span class="st-bad">✗ request failed</span>`;
+    if (token === fetchModelsToken) st.innerHTML = `<span class="st-bad">✗ request failed</span>`;
   }
-});
+}
+$("fetchModels").addEventListener("click", fetchModels);
 
-// Suggest a sensible default base URL when the provider changes.
+// Auto-refresh the model list when the server is enabled or the base URL changes,
+// so the picker stays current without a manual click.
+$("llmEnabled").addEventListener("change", () => { if ($("llmEnabled").checked) fetchModels(); });
+$("llmBaseURL").addEventListener("change", () => { if ($("llmEnabled").checked) fetchModels(); });
+
+// Suggest a sensible default base URL when the provider changes, then refresh.
 $("llmProvider").addEventListener("change", () => {
   const cur = $("llmBaseURL").value.trim();
   if (cur === "" || cur === "http://localhost:11434" || cur === "http://localhost:1234/v1") {
     $("llmBaseURL").value = $("llmProvider").value === "openai"
       ? "http://localhost:1234/v1" : "http://localhost:11434";
   }
+  if ($("llmEnabled").checked) fetchModels();
 });
 
 function flashCfg(msg, isErr) {
@@ -324,6 +334,8 @@ async function loadConfig() {
   $("alertCooldown").value = al.cooldown_seconds || 300;
 
   toggleBoxes();
+  // If the model server is already enabled, populate the model picker on load.
+  if ($("llmEnabled").checked) fetchModels();
 }
 
 // ---- CSV upload ----
