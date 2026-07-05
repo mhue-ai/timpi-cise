@@ -1,297 +1,115 @@
 # timpi-cise
 
-A small, self-contained tool that **exercises the [Timpi](https://timpi.io) search
-interface** at a deliberately gentle pace and shows results plus live execution
-metrics in a local dashboard.
+**A tiny app that runs real searches on [Timpi](https://timpi.com) and shows you — live, in your browser — that it's working.**
 
-It generates search **terms**, **phrases**, and **questions** and issues them one
-at a time, **never more than once per minute**. It ships as a single executable
-for Windows, Linux, macOS, and Raspberry Pi — no Docker, no runtime, no dev
-environment required.
-
-> **Responsible use.** This tool is meant to gently exercise / smoke-test the
-> search interface, not to generate abusive traffic. The one-query-per-minute
-> floor is compiled in and cannot be lowered. Please only point it at services
-> you are authorized to test. See [Safety & anti-abuse](#safety--anti-abuse).
+You download one file, double-click it, and a dashboard opens showing each search and how it's doing. That's it. No accounts, no Docker, no setup.
 
 ---
 
-## Quick start
+## What is this, in plain English?
 
-1. Download the binary for your platform from `dist/` (or build it — see below).
-2. Run it:
+[Timpi](https://timpi.io) is a **private, decentralized search engine** — an alternative to Google that doesn't track you.
 
-   ```bash
-   # Linux / macOS / Raspberry Pi
-   ./timpicise-linux-amd64
+**timpi-cise** is a small program you run on your own computer. It:
 
-   # Windows (double-click, or from a terminal)
-   timpicise-windows-amd64.exe
-   ```
+1. **Makes up realistic search queries** (like "best budget laptop" or "how does compost work").
+2. **Searches Timpi with them** — gently, at most **one search per minute**.
+3. **Shows you the results and health stats** on a live dashboard in your web browser.
 
-3. Your browser opens the dashboard at `http://127.0.0.1:8770`.
-4. It starts in **dry-run** mode (no network). Pick a mode, press **Start**, and
-   watch the **Live results** panel — it shows each query and its top results in
-   miniature (title, host, snippet) with a pulsing "LIVE" indicator, so you can
-   see at a glance that it's working. If an endpoint returns HTML instead of
-   results, an honest amber note says so rather than faking success.
+Think of it as a **friendly heartbeat monitor** for Timpi search: it exercises the search, watches how fast and how well it responds, and tells you the moment something looks off.
 
-### Command-line flags
+### Who is it for?
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--config <path>` | per-user config dir | Config file (created if missing). |
-| `--addr <host:port>` | `127.0.0.1:8770` | Dashboard listen address (loopback). |
-| `--no-open` | off | Don't auto-open a browser. |
-| `--start` | off | Begin polling immediately on launch. |
-| `--verbose` | off | Log at debug level. |
-| `--expose` | off | Allow non-loopback (LAN) access (disables the DNS-rebinding guard). |
-| `--version` | — | Print version and exit. |
+- **Timpi supporters** who want to help exercise the search and see it working.
+- **Anyone** who wants a simple, visual way to check that a search service is healthy over time.
+
+> **It's built to be gentle, not abusive.** It never sends more than one search per minute — that limit is baked into the program and can't be turned up. See [Is it safe?](#is-it-safe) below.
 
 ---
 
-## Modes
+## Install
 
-| Mode | What it does | Needs |
-|------|--------------|-------|
-| **dry-run** (default) | Generates queries and drives the whole pipeline **without any network activity**. Safe for demos and testing. | nothing |
-| **browser** | **Drives the real `timpi.com` search UI** in a headless browser and scrapes the rendered results. This is the faithful way to exercise timpi.com. | an installed Chrome/Edge/Chromium |
-| **public-web** | Hits a REST/JSON search endpoint over plain HTTP. | a REST endpoint (see below) |
-| **official-api** | Uses an authenticated Timpi Data API endpoint. | endpoint URL + API key |
+### The easy way — download and run
 
-### browser mode (recommended for timpi.com)
+1. Go to the [**Releases page**](https://github.com/mhue-ai/timpi-cise/releases/latest).
+2. Download the file for your computer:
 
-`timpi.com` is a **Blazor Server** app — its search runs client-side over a
-SignalR WebSocket, so there's no REST endpoint to hit (see *public-web* below).
-Browser mode solves this by driving a real browser:
+   | Your computer | File to download |
+   |---|---|
+   | **Windows** | `timpicise-windows-amd64.exe` |
+   | **Mac** (Apple Silicon — M1/M2/M3) | `timpicise-darwin-arm64` |
+   | **Mac** (Intel) | `timpicise-darwin-amd64` |
+   | **Linux** | `timpicise-linux-amd64` |
+   | **Raspberry Pi** (64-bit) | `timpicise-linux-arm64` |
+   | **Raspberry Pi** (32-bit / Pi Zero) | `timpicise-linux-armv7` / `timpicise-linux-armv6` |
 
-1. It launches an installed **Chrome/Edge/Chromium** (auto-detected; override
-   with a path if needed), navigates to `https://timpi.com/search?q={query}`,
-   dismisses the cookie banner, waits for results to render, and scrapes them.
-2. Results (title / URL / snippet) show in the live preview like any other mode.
-3. Defaults target timpi.com's DOM (`.all-item-content` / `a.title` /
-   `.description`); every selector is editable for other sites.
+3. **Run it:**
+   - **Windows:** double-click the `.exe`. (If Windows shows a warning, click *More info → Run anyway* — the file isn't code-signed yet.)
+   - **Mac / Linux / Raspberry Pi:** open a terminal in the download folder and run:
+     ```bash
+     chmod +x timpicise-*        # make it runnable (first time only)
+     ./timpicise-linux-amd64     # use your file's name
+     ```
 
-It's heavier than an HTTP call (~a few seconds per query) but is the only way to
-get **real results** from a client-rendered search site. The 1-query/minute floor
-still applies. Requires a browser installed — it is **not** bundled.
+Your web browser opens automatically at **http://127.0.0.1:8770** with the dashboard. Done.
 
-### The destination endpoint (what's best)
+### Build it yourself (optional)
 
-The **endpoint is fully user-editable** in the dashboard, and the app ships with
-the best discoverable default already filled in. Here's what the default is and
-why:
-
-`timpi.com`'s search is a **Blazor Server** application. It runs over a stateful
-**SignalR WebSocket** (`/_blazor`) with server-rendered UI diffs — there is **no
-public REST/JSON search endpoint** to point an HTTP client at. (`api.timpi.com`
-exists but 404s on search paths; `timpi.com/api/search?q=…` just returns the
-app's HTML shell.)
-
-So, in order of preference for timpi.com:
-
-- **`browser` mode** (recommended) — drives the real timpi.com UI and returns
-  real results. See [browser mode](#browser-mode-recommended-for-timpicom) above.
-- **`official-api` mode** — the Timpi **Data API** endpoint + key from
-  `hello@timpi.io`; the interface Timpi provides for machine queries.
-- **`public-web` mode** — for any search engine that *does* expose a REST/JSON
-  endpoint. Put the URL in **Endpoint URL** (use `{query}` for the term, or set a
-  **Query param** like `q`) and a **Results JSON path** (e.g. `data.results`).
-  Against timpi.com's `/api/search` it just returns the HTML app shell, and the
-  app **says so honestly** (amber "returned an HTML page, not JSON" note) rather
-  than faking success — so use browser mode there instead.
-
-### Configuring `official-api`
-
-As a Timpi stakeholder you can request a Data API endpoint + key from
-`hello@timpi.io`. Enter the endpoint (with `{query}` or a query param) and your
-key. The key is stored locally and is **never sent to the browser** by the
-dashboard.
-
----
-
-## Query sources
-
-You choose where queries come from:
-
-### Built-in generator
-
-- **realistic** — draws from a curated corpus of real-world queries spanning
-  navigational / informational / transactional / local intents, sampled
-  **head-weighted (Zipfian-like)** so common queries recur and the long tail
-  stays diverse — traffic shaped like genuine search demand. *(Recommended.)*
-- **terms** — short generic searches (e.g. `renewable energy`, `chess strategy tips`).
-- **phrases** — multi-word phrases from templates (e.g. `affordable electric vehicles for beginners`).
-- **questions** — natural-language questions (e.g. `how does quantum computing actually work`).
-- **mixed** — rotates through terms, phrases, and questions.
-
-### Your own CSV term list
-
-Select **"my CSV term list"** and upload a `.csv`/`.txt` file (one query per
-line). An optional second column sets the kind (`terms`/`phrases`/`questions`);
-otherwise the kind is inferred from the text. Tick **Shuffle** to randomize the
-order. The uploaded list is saved under the log folder and reused across runs.
-
-```csv
-best privacy tools
-how does decentralized search work?,questions
-solar panel payback period,phrases
-```
-
-### Optional: model server for any/all types
-
-Enable **"Use a local model server for advanced questions"** to have a model
-generate queries. It can produce **all three types** — short terms, long
-phrases, and questions — and you pick per type whether it comes from the
-**model** or the **built-in CPU generator**:
-
-| Type | Built-in (CPU) | Model server |
-|------|:--------------:|:------------:|
-| short terms | ✅ | ✅ (tick "short terms") |
-| long phrases | ✅ | ✅ (tick "long phrases") |
-| questions | ✅ | ✅ (tick "questions") |
-
-Any type left unticked uses the CPU generator. If the server is unreachable,
-**every** type falls back to CPU automatically — so this stays optional and the
-binary stays tiny (no model is ever bundled).
-
-Two providers are supported:
-
-- **Ollama (native)** — [ollama.com](https://ollama.com); default `http://localhost:11434`.
-  Uses your GPU if one is attached, else CPU.
-- **OpenAI-compatible** — any server exposing `/v1/chat/completions`, including
-  **LM Studio, llama.cpp's server, Jan, LocalAI, vLLM, text-generation-webui**,
-  or a hosted API. Default base URL `http://localhost:1234/v1`. An API key field
-  is available for servers that require one.
-
-## Assertions & golden queries (monitor mode)
-
-Beyond generating traffic, timpi-cise can **check** each query and report
-pass/fail — turning it into a lightweight search monitor.
-
-- **Global assertions** (dashboard → *assertions*): fail a query if it errors,
-  returns fewer than *N* results, or exceeds a *max latency*.
-- **Golden queries**: add a **third column** to your CSV with a substring that a
-  result must contain. Example `queries.csv`:
-
-  ```csv
-  timpi,terms,timpi.io
-  privacy tools,phrases,
-  how does search indexing work?,questions,
-  ```
-
-  The first row asserts that searching `timpi` returns a result containing
-  `timpi.io` — a classic index-regression canary. Golden checks run even with
-  global assertions off.
-
-Failures are counted (dashboard **Assertions** card), flagged per row (**FAIL**
-chip), logged (`assertion failed …`), and recorded in the results CSV.
-
-## Metrics & monitoring
-
-- **Latency percentiles** — p50 / p95 / p99 (averages hide tail latency).
-- **Zero-result rate** — the share of successful queries returning nothing, a
-  key search-health signal.
-- **Trends** — per-minute sparklines of average latency and success rate.
-- **Persistence** — counters and trends are saved to `<logdir>/metrics.json`
-  every 30s and on shutdown, and restored on startup, so history survives
-  restarts (toggle in the dashboard).
-- **`/healthz`** — JSON liveness (`status`, `version`, `uptime`, `running`).
-- **`/metrics`** — Prometheus exposition format for Grafana/alerting, e.g.
-  `timpicise_queries_total`, `timpicise_zero_results_total`,
-  `timpicise_assert_failures_total`, `timpicise_latency_ms_p95`.
-- **`--version`** — prints the embedded build version.
-
-## Alerts
-
-Set health thresholds (dashboard → *alerts*) evaluated over the last *N* queries:
-**error rate**, **zero-result rate**, **assertion-failure rate**, and **p95
-latency**. On a breach the tool logs an error, shows a banner on the dashboard,
-and (if a **webhook URL** is set) POSTs a message — compatible with **Slack**,
-**Discord**, and generic incoming webhooks. Alerts are edge-triggered with a
-cooldown (no notification floods) and send a recovery notice when metrics return
-to normal.
-
-## Accessibility
-
-The dashboard has a skip link, visible keyboard focus states, ARIA roles/labels
-(`role=alert`/`aria-live` for alerts and live results, scoped table headers,
-labelled charts), colorblind-safe status glyphs (✓/✗, not color alone), and
-honors `prefers-reduced-motion`.
-
-## Logging
-
-- **CSV results log** — every executed query is appended to `results.csv`
-  (time, mode, kind, query, status, count, latency, ok, error, top title).
-  Download it any time from the dashboard, or open the file directly.
-- **App log** — a structured `timpicise.log` capturing lifecycle, config
-  changes, and errors (also echoed to the terminal). Run with `--verbose` for
-  debug-level detail.
-- Both live under a per-user **log folder** shown in the dashboard (overridable
-  via the config file). Both can be toggled off.
-
----
-
-## Safety & anti-abuse
-
-- **Hard floor of 1 query / 60s.** Enforced in code (`config.MinPollSeconds`);
-  the UI and config file cannot go below it.
-- **One query at a time.** No concurrency, no burst.
-- **Randomized jitter** so traffic isn't perfectly periodic.
-- **Honest User-Agent** identifying the tool and its repo.
-- **Backoff that honors `429`/`503`** and `Retry-After` — it slows down when the
-  server asks it to.
-- **Dry-run by default** — it does nothing over the network until you opt in.
-- **Loopback dashboard** — the UI binds to `127.0.0.1` by default.
-- **DNS-rebinding / CSRF guard** — the dashboard rejects requests with a
-  non-local `Host` header and cross-origin state-changing requests. Binding to a
-  non-loopback address requires an explicit `--expose` flag (with a warning).
-- **Endpoint URL validation** — only `http(s)` endpoints are accepted.
-- **Log & CSV rotation** — the app log and results CSV rotate at 10 MiB so they
-  can't grow without bound.
-
----
-
-## Build from source
-
-Requires [Go](https://go.dev/dl/) 1.26+.
+If you'd rather build from source, you only need [Go](https://go.dev/dl/) 1.26+:
 
 ```bash
-# Build for your current platform
+git clone https://github.com/mhue-ai/timpi-cise.git
+cd timpi-cise
 go build -o timpicise ./cmd/timpicise
-
-# Run the tests
-go test ./...
-
-# Cross-compile every supported target into ./dist
-./build.sh
+./timpicise
 ```
 
-The only third-party dependency is [`chromedp`](https://github.com/chromedp/chromedp)
-(pure Go), used for `browser` mode; it drives an installed browser and bundles
-nothing, so the single binary still cross-compiles everywhere.
-
-`build.sh` produces binaries for Windows (amd64/arm64), Linux (amd64/arm64),
-Raspberry Pi (armv7 32-bit, armv6 Pi Zero), and macOS (amd64/arm64) — all from a
-single machine, thanks to Go's cross-compilation.
+To build for every platform at once: `./build.sh` (outputs to `dist/`).
 
 ---
 
-## Project layout
+## How to use it
 
-```
-cmd/timpicise/        entry point (flags, browser open, shutdown)
-internal/config/      configuration + safety invariants (60s floor)
-internal/generate/    generators + realistic corpus + CSV source + LLM clients
-internal/search/      adapters: dry-run, browser (chromedp), public-web, official-api
-internal/runner/      the rate-limited polling loop + backoff + assertions
-internal/metrics/     counters, percentiles, time series, persistence, windows
-internal/alert/       threshold evaluation + webhook notifications
-internal/reslog/      CSV results-log writer (with safe rotation)
-internal/rotate/      size-based rotating file writer (app log)
-internal/server/      local dashboard + JSON API + /healthz + /metrics + guard
-```
+1. **Run the app** — the dashboard opens in your browser.
+2. It starts in **dry-run** mode (a safe practice mode that sends nothing anywhere).
+3. To do **real** searches on Timpi, choose **browser mode** in the *Configuration* panel — it drives a real browser in the background to search timpi.com. *(This needs Chrome, Edge, or Chromium installed — most computers already have one.)*
+4. Press **Start** and watch the **Live results** panel fill in.
+
+The dashboard shows each search, the results it found, how fast it was, and overall health (success rate, slowness, and more).
+
+---
+
+## Is it safe?
+
+Yes — it's deliberately built to be a gentle, good-neighbor tool, not a way to hammer a service:
+
+- 🐢 **One search per minute, maximum.** This limit is compiled into the program and **cannot be increased**.
+- 🔒 **Runs only on your computer.** The dashboard is private to your machine unless you explicitly open it up.
+- 🙅 **Honest by default.** It starts in a mode that sends nothing, and it tells you clearly when a search returns no real results instead of pretending everything's fine.
+- 🛑 **Backs off automatically** if the service ever asks it to slow down.
+
+---
+
+## A quick tour of the features
+
+- **Live dashboard** — see every search and its results as they happen.
+- **Realistic queries** — a built-in library of real-world searches, or upload your own list.
+- **Health metrics** — success rate, zero-result rate, response-time percentiles, and hour-long trend charts.
+- **Checks & alerts** — set expectations (e.g. "a search should return at least 3 results in under 2 seconds") and get a notification (Slack/Discord/webhook) if things go wrong.
+- **Keeps history** — stats survive restarts, and every search is saved to a spreadsheet-friendly CSV file you can download.
+- **Runs everywhere** — Windows, Mac, Linux, and Raspberry Pi, all from a single small file.
+
+---
+
+## Questions?
+
+- **Does it cost anything?** No. It's free and open source (MIT license).
+- **Do I need a Timpi account or API key?** No — browser mode uses the public timpi.com site. (An optional "official API" mode exists for advanced users with a Timpi Data API key.)
+- **Where are my logs saved?** In a per-user folder shown on the dashboard (the *Logging* section).
+- **Something looks wrong / I have an idea.** Please [open an issue](https://github.com/mhue-ai/timpi-cise/issues).
+
+For the full technical details — every mode, setting, metric, and endpoint — see [**DETAILS.md**](DETAILS.md).
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE) © mhue-ai
