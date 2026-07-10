@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/mhue-ai/timpi-cise/internal/config"
 )
@@ -28,12 +29,26 @@ type browserAdapter struct {
 	cfg config.Browser
 	ua  string
 
-	mu      sync.Mutex
-	alloc   context.Context
-	cancelA context.CancelFunc
-	brCtx   context.Context
-	cancelB context.CancelFunc
-	started bool
+	mu         sync.Mutex
+	alloc      context.Context
+	cancelA    context.CancelFunc
+	brCtx      context.Context
+	cancelB    context.CancelFunc
+	started    bool
+	failStreak int // consecutive Search failures; triggers a browser relaunch
+}
+
+// teardownLocked cancels the browser and marks it stopped so the next ensure()
+// relaunches a fresh one. The caller must hold a.mu.
+func (a *browserAdapter) teardownLocked() {
+	if a.cancelB != nil {
+		a.cancelB()
+	}
+	if a.cancelA != nil {
+		a.cancelA()
+	}
+	a.started = false
+	a.failStreak = 0
 }
 
 func newBrowserAdapter(cfg config.Browser, userAgent string) *browserAdapter {
@@ -96,7 +111,26 @@ func (a *browserAdapter) ensure() error {
 	return nil
 }
 
+// Search runs one query, self-healing the browser if it gets wedged: after two
+// consecutive failures it tears the browser down so the next query relaunches a
+// fresh one. This recovers automatically from a stuck/orphaned browser (e.g.
+// after the machine was under load) instead of failing every query thereafter.
 func (a *browserAdapter) Search(ctx context.Context, query string) (Result, error) {
+	res, err := a.searchOnce(ctx, query)
+	a.mu.Lock()
+	if err != nil {
+		a.failStreak++
+		if a.failStreak >= 2 && a.started {
+			a.teardownLocked() // next Search re-launches a clean browser
+		}
+	} else {
+		a.failStreak = 0
+	}
+	a.mu.Unlock()
+	return res, err
+}
+
+func (a *browserAdapter) searchOnce(ctx context.Context, query string) (Result, error) {
 	if err := a.ensure(); err != nil {
 		return Result{Query: query}, err
 	}
@@ -120,9 +154,22 @@ func (a *browserAdapter) Search(ctx context.Context, query string) (Result, erro
 
 	start := time.Now()
 
-	// Navigate and dismiss any cookie-consent banner.
+	// Start navigation WITHOUT waiting for the full page "load" event. Search
+	// sites like timpi.com load ad/analytics scripts that can hang, so waiting
+	// for "load" (which chromedp.Navigate does) would time out even though the
+	// results themselves have already rendered. We fire the navigation and then
+	// poll for the results below.
 	if err := chromedp.Run(tctx,
-		chromedp.Navigate(target),
+		chromedp.ActionFunc(func(c context.Context) error {
+			_, _, errText, _, err := page.Navigate(target).Do(c)
+			if err != nil {
+				return err
+			}
+			if errText != "" {
+				return fmt.Errorf("%s", errText)
+			}
+			return nil
+		}),
 		chromedp.Sleep(1500*time.Millisecond),
 		chromedp.ActionFunc(func(c context.Context) error {
 			if a.cfg.ConsentSelector != "" {
@@ -192,13 +239,7 @@ func (a *browserAdapter) Close() error {
 	if !a.started {
 		return nil
 	}
-	if a.cancelB != nil {
-		a.cancelB()
-	}
-	if a.cancelA != nil {
-		a.cancelA()
-	}
-	a.started = false
+	a.teardownLocked()
 	return nil
 }
 
