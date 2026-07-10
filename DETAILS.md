@@ -5,6 +5,12 @@ overview and install steps, see the [README](README.md).
 
 ## Command-line flags
 
+**All flags are optional** — running the executable with **no arguments** (e.g. a
+double-click) is the normal way to use it. It loads/creates its config in a
+per-user folder, opens the dashboard in your browser, and if the default port is
+busy it automatically picks the next free one. The flags below are only for
+advanced or scripted use.
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--config <path>` | per-user config dir | Config file (created if missing). |
