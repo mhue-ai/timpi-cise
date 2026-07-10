@@ -19,8 +19,8 @@ overview and install steps, see the [README](README.md).
 
 | Mode | What it does | Needs |
 |------|--------------|-------|
-| **dry-run** (default) | Generates queries and drives the whole pipeline with **no network activity**. | nothing |
-| **browser** | Drives the real `timpi.com` UI in a headless browser and scrapes the rendered results. The faithful way to exercise timpi.com. | an installed Chrome/Edge/Chromium |
+| **browser** (default) | Drives the real `timpi.com` UI in a headless browser and scrapes the rendered results. The faithful way to exercise timpi.com. | an installed Chrome/Edge/Chromium |
+| **dry-run** | Generates queries and drives the whole pipeline with **no network activity** — a safe practice mode. | nothing |
 | **public-web** | Hits a REST/JSON search endpoint over plain HTTP. | a REST endpoint |
 | **official-api** | Uses an authenticated Timpi Data API endpoint. | endpoint URL + API key |
 
@@ -76,6 +76,11 @@ API). Choose per type — short terms / long phrases / questions — whether it 
 from the model or the built-in CPU generator. If the server is unreachable, every
 type falls back to CPU. No model is bundled.
 
+**This is on by default**, pointed at **LM Studio** (OpenAI-compatible,
+`http://localhost:1234/v1`), generating questions. It's still optional: if no
+model server is running (or no model is picked), generation transparently uses
+the built-in CPU generator — so the app works fine with or without local AI.
+
 **Picking a model.** The tool polls your server for the models it has available
 (Ollama's `/api/tags` or the OpenAI-compatible `/models`, via `POST
 /api/llm/models`) and shows them in a **dropdown**, so you select rather than
@@ -107,8 +112,11 @@ Failures are counted, badged (**FAIL** chip), logged, and written to the CSV.
 - **Latency percentiles** — p50 / p95 / p99.
 - **Zero-result rate** — share of successful queries returning nothing.
 - **Trends** — per-minute sparklines of average latency and success rate.
-- **Persistence** — counters/trends saved to `<logdir>/metrics.json` every 30s
-  and on shutdown, restored on startup.
+- **Counters reset on every start** — each run reports fresh metrics; they are
+  not carried across restarts.
+- **Persistence** (optional) — writes a live snapshot to `<logdir>/metrics.json`
+  every 30s and on shutdown for external scraping/backup. It does **not** restore
+  counters on start (see above).
 - **`/healthz`** — JSON liveness (`status`, `version`, `uptime`, `running`).
 - **`/metrics`** — Prometheus exposition format for Grafana/alerting, e.g.
   `timpicise_queries_total`, `timpicise_zero_results_total`,
@@ -140,7 +148,9 @@ metrics return to normal.
 - **One query at a time.** No concurrency, no burst. Randomized jitter.
 - **Honest User-Agent** identifying the tool and its repo.
 - **Backoff that honors `429`/`503`** and `Retry-After`.
-- **Dry-run by default** — does nothing over the network until you opt in.
+- **Never auto-searches** — polling begins only when you press **Start** (or pass
+  `--start`). The default mode is `browser` (real timpi.com searches), but nothing
+  is sent until you Start. Switch to `dry-run` to generate queries with no network.
 - **Loopback dashboard** — binds to `127.0.0.1` by default.
 - **DNS-rebinding / CSRF guard** — rejects requests with a non-local `Host`
   header and cross-origin state-changing requests. Non-loopback bind requires
