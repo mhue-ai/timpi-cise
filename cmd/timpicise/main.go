@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -71,10 +72,19 @@ func run() error {
 			fmt.Fprintf(os.Stderr, "warning: could not write fresh config: %v\n", serr)
 		}
 	}
-	if *addr != "" {
+	addrExplicit := *addr != ""
+	if addrExplicit {
 		cfg.Server.Addr = *addr
 	}
 	cfg.Sanitize()
+
+	// Zero-arguments friendliness: if the default port is already taken (e.g. a
+	// stray instance is still running), pick the next free port automatically so
+	// a plain double-click just works instead of failing to bind. An explicit
+	// --addr is respected exactly (no auto-shifting).
+	if !addrExplicit {
+		cfg.Server.Addr = firstFreeAddr(cfg.Server.Addr)
+	}
 
 	logger, closeLog := setupLogging(cfg, *verbose)
 	defer closeLog()
@@ -109,9 +119,20 @@ func run() error {
 	}
 
 	url := "http://" + normalizeHost(srv.Addr())
-	fmt.Println("timpi-cise dashboard:", url)
-	fmt.Println("mode:", cfg.Mode, "| interval:", cfg.PollSeconds, "s (min 60) | config:", *cfgPath)
-	fmt.Println("Press Ctrl+C to quit.")
+	fmt.Println()
+	fmt.Println("  timpi-cise is running.")
+	fmt.Println()
+	fmt.Println("  Dashboard:  " + url)
+	if !*noOpen {
+		fmt.Println("              (opening it in your browser now...)")
+	}
+	if !*autostart {
+		fmt.Println("  Next step:  press the \"Start\" button on the dashboard.")
+	}
+	fmt.Println("  Mode:       " + cfg.Mode + " (at most one search per minute)")
+	fmt.Println()
+	fmt.Println("  To stop:    close this window (or press Ctrl+C).")
+	fmt.Println()
 
 	if !*noOpen {
 		go openBrowserWhenReady(srv.Addr(), url)
@@ -205,6 +226,29 @@ func defaultConfigPath() string {
 		return filepath.Join(dir, "timpi-cise", "config.json")
 	}
 	return "timpi-cise-config.json"
+}
+
+// firstFreeAddr returns the given host:port if it can be bound, otherwise the
+// next free port after it (searching a small range). If none is free it returns
+// the original address and lets the server report the bind error.
+func firstFreeAddr(addr string) string {
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return addr
+	}
+	for i := 0; i < 20; i++ {
+		cand := net.JoinHostPort(host, strconv.Itoa(port+i))
+		ln, err := net.Listen("tcp", cand)
+		if err == nil {
+			_ = ln.Close()
+			return cand
+		}
+	}
+	return addr
 }
 
 // hostIsLoopback reports whether a listen address binds only to the loopback
