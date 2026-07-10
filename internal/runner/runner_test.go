@@ -17,7 +17,9 @@ import (
 func TestConcurrentControl(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	met := metrics.New(10)
-	cfg := config.Default() // dry-run, valid without network
+	cfg := config.Default()
+	cfg.Mode = config.ModeDryRun       // no network/browser during the stress test
+	cfg.Generation.LLM.Enabled = false // don't call a model server
 	// Disable the results CSV so the test touches no disk.
 	cfg.Logging.CSVResults = false
 	cfg.Logging.AppLog = false
@@ -68,6 +70,8 @@ func TestSafetyFloorNotBypassable(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	met := metrics.New(10)
 	cfg := config.Default()
+	cfg.Mode = config.ModeDryRun
+	cfg.Generation.LLM.Enabled = false
 	cfg.PollSeconds = 1 // below the floor
 	cfg.JitterSeconds = 0
 	cfg.Logging.CSVResults = false

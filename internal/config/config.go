@@ -22,9 +22,9 @@ const MinPollSeconds = 60
 
 // Connection modes.
 const (
-	ModeDryRun      = "dry-run"      // generate queries, never touch the network (default)
+	ModeDryRun      = "dry-run"      // generate queries, never touch the network
 	ModePublicWeb   = "public-web"   // hit a REST search endpoint over HTTP
-	ModeBrowser     = "browser"      // drive the real timpi.com UI in a headless browser
+	ModeBrowser     = "browser"      // drive the real timpi.com UI in a headless browser (default)
 	ModeOfficialAPI = "official-api" // use an authenticated Timpi Data API endpoint
 )
 
@@ -210,8 +210,9 @@ type Logging struct {
 	// CSVResults enables appending each executed query result to a CSV file.
 	CSVResults bool `json:"csv_results"`
 
-	// PersistMetrics saves aggregate metrics to disk so counters and trends
-	// survive a restart.
+	// PersistMetrics writes a live snapshot of metrics to metrics.json (for
+	// external scraping/backup). Counters are NOT restored on start — each run
+	// begins with fresh counters.
 	PersistMetrics bool `json:"persist_metrics"`
 }
 
@@ -329,11 +330,15 @@ func (c Config) MetricsPath() string {
 	return filepath.Join(c.Logging.Dir, "metrics.json")
 }
 
-// Default returns a safe default configuration: dry-run mode, one query per
-// minute, mixed generation, dashboard on loopback.
+// Default returns the default configuration: it exercises the real timpi.com
+// interface (browser mode) at one query per minute, and by default generates
+// questions with a local LM Studio model (OpenAI-compatible on :1234/v1). The AI
+// is optional — if the model server is unreachable, generation transparently
+// falls back to the built-in CPU generator. Polling still does not begin until
+// the user presses Start (or passes --start).
 func Default() Config {
 	return Config{
-		Mode:          ModeDryRun,
+		Mode:          ModeBrowser,
 		PollSeconds:   MinPollSeconds,
 		JitterSeconds: 15,
 		UserAgent:     "timpi-cise/0.1 (+https://github.com/mhue-ai/timpi-cise; interface-exerciser)",
@@ -341,10 +346,10 @@ func Default() Config {
 			Mode:   GenMixed,
 			Source: SourceBuiltin,
 			LLM: LLM{
-				Enabled:  false,
-				Provider: LLMOllama,
-				BaseURL:  "http://localhost:11434",
-				Model:    "llama3.2",
+				Enabled:  true,      // AI on by default; falls back to CPU if unavailable
+				Provider: LLMOpenAI, // LM Studio / any OpenAI-compatible server
+				BaseURL:  "http://localhost:1234/v1",
+				Model:    "", // pick via "Fetch installed models"
 				Kinds:    LLMKinds{Questions: true},
 			},
 		},

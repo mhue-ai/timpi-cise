@@ -16,6 +16,8 @@ import (
 func testServer(t *testing.T) *Server {
 	t.Helper()
 	cfg := config.Default()
+	cfg.Mode = config.ModeDryRun // keep handler tests network/browser-free
+	cfg.Generation.LLM.Enabled = false
 	cfg.Logging.CSVResults = false
 	cfg.Logging.AppLog = false
 	cfg.Logging.PersistMetrics = false

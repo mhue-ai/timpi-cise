@@ -71,11 +71,11 @@ To build for every platform at once: `./build.sh` (outputs to `dist/`).
 ## How to use it
 
 1. **Run the app** — the dashboard opens in your browser.
-2. It starts in **dry-run** mode (a safe practice mode that sends nothing anywhere).
-3. To do **real** searches on Timpi, choose **browser mode** in the *Configuration* panel — it drives a real browser in the background to search timpi.com. *(This needs Chrome, Edge, or Chromium installed — most computers already have one.)*
-4. Press **Start** and watch the **Live results** panel fill in.
+2. By default it's set to **browser mode** — real searches against **timpi.com** — using a real browser in the background. *(This needs Chrome, Edge, or Chromium installed; most computers already have one.)* Nothing is sent until you press Start. If you'd rather practice safely first, switch the mode to **dry-run** (which sends nothing anywhere).
+3. Press **Start** and watch the **Live results** panel fill in.
+4. *(Optional)* If you run **LM Studio** or **Ollama**, the app is set up to have your local model write the search questions — click **Fetch installed models** and pick one. Don't have one? No problem — it falls back to its own built-in question generator automatically.
 
-The dashboard shows each search, the results it found, how fast it was, and overall health (success rate, slowness, and more).
+The dashboard shows each search, the results it found, how fast it was, and overall health (success rate, slowness, and more). Counters reset each time you start the app.
 
 ---
 
@@ -85,7 +85,7 @@ Yes — it's deliberately built to be a gentle, good-neighbor tool, not a way to
 
 - 🐢 **One search per minute, maximum.** This limit is compiled into the program and **cannot be increased**.
 - 🔒 **Runs only on your computer.** The dashboard is private to your machine unless you explicitly open it up.
-- 🙅 **Honest by default.** It starts in a mode that sends nothing, and it tells you clearly when a search returns no real results instead of pretending everything's fine.
+- 🙅 **Never searches until you say so.** Polling doesn't start on its own — you press **Start**. And it tells you clearly when a search returns no real results instead of pretending everything's fine.
 - 🛑 **Backs off automatically** if the service ever asks it to slow down.
 
 ---

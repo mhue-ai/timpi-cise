@@ -12,6 +12,7 @@ func gen(mode string) *Generator {
 	c := config.Default().Generation
 	c.Mode = mode
 	c.Source = config.SourceBuiltin
+	c.LLM.Enabled = false // exercise the built-in CPU generator only (no model server)
 	return New(c, nil)
 }
 

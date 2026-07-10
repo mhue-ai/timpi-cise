@@ -92,12 +92,10 @@ func run() error {
 		}
 	}
 
+	// Counters reset on every start (they are not restored from disk), so each
+	// run reports fresh metrics. Persistence, if enabled, still writes a live
+	// snapshot to metrics.json for external scraping/backup.
 	met := metrics.New(50)
-	if cfg.Logging.PersistMetrics {
-		if err := met.LoadFrom(cfg.MetricsPath()); err != nil {
-			logger.Warn("could not load persisted metrics", "err", err)
-		}
-	}
 	run := runner.New(cfg, *cfgPath, met, logger)
 	defer run.Close()
 	srv := server.New(run, met, logger, version, allowLAN)
