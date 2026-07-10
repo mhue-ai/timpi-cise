@@ -266,13 +266,17 @@ func (r *Runner) step(stop <-chan struct{}) time.Duration {
 	alerter := r.alerter
 	r.mu.Unlock()
 
-	// Bound the whole query (optional model generation + the search) so a hung
-	// backend cannot stall the loop. Generous enough to cover a slow reasoning
-	// model generating a query AND a headless-browser search after it.
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
+	// Generation gets its own bounded context so a slow model server (e.g. a
+	// heavy reasoning model) cannot eat the search's time budget — if generation
+	// exceeds this, it falls back to the built-in CPU generator.
+	genCtx, genCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	q := gen.Next(genCtx)
+	genCancel()
 
-	q := gen.Next(ctx)
+	// The search gets a fresh, independent budget so it is never shortened by a
+	// slow generation step.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 	result, err := adapter.Search(ctx, q.Text)
 
 	summary := metrics.ResultSummary{

@@ -107,6 +107,10 @@ func (a *browserAdapter) Search(ctx context.Context, query string) (Result, erro
 	brCtx := a.brCtx
 	a.mu.Unlock()
 
+	// The query reuses the long-lived warm tab (kept ready between queries so the
+	// Blazor app stays bootstrapped and results render fully). The runner gives
+	// generation and the search independent time budgets, so a slow model can no
+	// longer cancel this search mid-flight and leave the tab in a bad state.
 	timeout := time.Duration(a.cfg.TimeoutSeconds) * time.Second
 	tctx, cancel := context.WithTimeout(brCtx, timeout)
 	defer cancel()
