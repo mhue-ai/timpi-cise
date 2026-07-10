@@ -415,6 +415,13 @@ func Save(path string, c Config) error {
 	if err != nil {
 		return err
 	}
+	// Ensure the parent directory exists — otherwise WriteFile fails and the
+	// config silently never persists (so the next start falls back to defaults).
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
 	return os.WriteFile(path, b, 0o600)
 }
 
