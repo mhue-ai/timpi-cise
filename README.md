@@ -2,6 +2,8 @@
 
 **A tiny app that runs real searches on [Timpi](https://timpi.com) and shows you — live, in your browser — that it's working.**
 
+**🌐 [Website](https://mhue-ai.github.io/timpi-cise/) · ⬇️ [Download](https://github.com/mhue-ai/timpi-cise/releases/latest) · 📖 [Full docs](DETAILS.md)**
+
 You download one file, double-click it, and a dashboard opens showing each search and how it's doing. That's it. No accounts, no Docker, no setup.
 
 ---
